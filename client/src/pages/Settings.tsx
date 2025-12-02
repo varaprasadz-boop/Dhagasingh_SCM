@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Separator } from "@/components/ui/separator";
+import { FileUpload } from "@/components/FileUpload";
 import {
   Select,
   SelectContent,
@@ -16,12 +18,13 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { useMobile } from "@/contexts/MobileContext";
 import {
   Settings as SettingsIcon,
-  User,
   Bell,
-  Shield,
   Palette,
   Database,
   Save,
+  QrCode,
+  Upload,
+  Trash2,
 } from "lucide-react";
 
 export default function Settings() {
@@ -32,9 +35,31 @@ export default function Settings() {
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [orderNotifications, setOrderNotifications] = useState(true);
   const [stockAlerts, setStockAlerts] = useState(true);
+  const [qrCodeFile, setQrCodeFile] = useState<File | null>(null);
+  const [qrCodePreview, setQrCodePreview] = useState<string | null>(null);
+
+  const handleQrUpload = (file: File) => {
+    setQrCodeFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setQrCodePreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveQr = () => {
+    setQrCodeFile(null);
+    setQrCodePreview(null);
+  };
 
   const handleSave = () => {
-    console.log("Settings saved");
+    console.log("Settings saved", {
+      lowStockThreshold,
+      emailNotifications,
+      orderNotifications,
+      stockAlerts,
+      qrCodeFile: qrCodeFile?.name,
+    });
   };
 
   return (
@@ -51,7 +76,7 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="general">
-        <TabsList>
+        <TabsList className="flex-wrap">
           <TabsTrigger value="general">
             <SettingsIcon className="h-4 w-4 mr-2" />
             General
@@ -67,6 +92,10 @@ export default function Settings() {
           <TabsTrigger value="inventory">
             <Database className="h-4 w-4 mr-2" />
             Inventory
+          </TabsTrigger>
+          <TabsTrigger value="payment">
+            <QrCode className="h-4 w-4 mr-2" />
+            Payment
           </TabsTrigger>
         </TabsList>
 
@@ -259,6 +288,110 @@ export default function Settings() {
                   </p>
                 </div>
                 <Switch defaultChecked data-testid="switch-auto-restock" />
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="payment" className="space-y-6 mt-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Company QR Code</CardTitle>
+              <CardDescription>
+                Upload the company QR code for internal courier payment collection
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid lg:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    This QR code will be displayed to internal delivery employees when 
+                    collecting payments from customers via QR method.
+                  </p>
+
+                  {!qrCodePreview && (
+                    <FileUpload
+                      accept="image/*"
+                      label="Upload QR Code"
+                      description="PNG, JPG up to 2MB"
+                      onUpload={handleQrUpload}
+                    />
+                  )}
+
+                  {qrCodePreview && (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={handleRemoveQr}
+                        data-testid="button-remove-qr"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Remove QR
+                      </Button>
+                      <span className="text-sm text-muted-foreground">
+                        {qrCodeFile?.name}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-center">
+                  {qrCodePreview ? (
+                    <div className="border rounded-lg p-4 bg-white">
+                      <img
+                        src={qrCodePreview}
+                        alt="Company QR Code"
+                        className="w-48 h-48 object-contain"
+                        data-testid="img-qr-preview"
+                      />
+                    </div>
+                  ) : (
+                    <div className="border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center text-muted-foreground">
+                      <QrCode className="h-16 w-16 mb-2" />
+                      <p className="text-sm">No QR code uploaded</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-2">
+                <Label>UPI ID (Display only)</Label>
+                <Input
+                  placeholder="yourcompany@upi"
+                  data-testid="input-upi-id"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Optional: Display UPI ID for manual entry if QR scan fails
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Payment Settings</CardTitle>
+              <CardDescription>Configure payment collection options</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium">Allow Cash Collection</p>
+                  <p className="text-sm text-muted-foreground">
+                    Enable cash collection by internal couriers
+                  </p>
+                </div>
+                <Switch defaultChecked data-testid="switch-allow-cash" />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium">Allow QR Collection</p>
+                  <p className="text-sm text-muted-foreground">
+                    Enable QR code payment collection
+                  </p>
+                </div>
+                <Switch defaultChecked data-testid="switch-allow-qr" />
               </div>
             </CardContent>
           </Card>

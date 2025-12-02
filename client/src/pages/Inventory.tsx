@@ -6,12 +6,39 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { PackagePlus, PackageMinus, History, Download } from "lucide-react";
-import { mockProducts, mockStockMovements, type ProductVariant, type StockMovement } from "@/lib/mockData";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { PackagePlus, PackageMinus, History, Download, Search, AlertCircle, Package, Truck } from "lucide-react";
+import { mockProducts, mockStockMovements, mockOrders, mockComplaints, mockCouriers, type ProductVariant, type StockMovement, type Order } from "@/lib/mockData";
 
 export default function Inventory() {
   const [searchQuery, setSearchQuery] = useState("");
   const [receiveModalOpen, setReceiveModalOpen] = useState(false);
+  const [manualDispatchOpen, setManualDispatchOpen] = useState(false);
+
+  const [orderLookup, setOrderLookup] = useState("");
+  const [foundOrder, setFoundOrder] = useState<Order | null>(null);
+  const [lookupError, setLookupError] = useState("");
+  const [dispatchType, setDispatchType] = useState<"fresh" | "replacement">("fresh");
+  const [selectedCourier, setSelectedCourier] = useState("");
+  const [assignedTo, setAssignedTo] = useState("");
 
   const allVariants = mockProducts.flatMap((p) =>
     p.variants.map((v) => ({ ...v, productName: p.name }))
@@ -111,6 +138,11 @@ export default function Inventory() {
       render: (m: StockMovement) => (m.costPrice ? `₹${m.costPrice}` : "-"),
     },
     {
+      key: "invoiceNumber",
+      header: "Invoice",
+      render: (m: StockMovement) => m.invoiceNumber || "-",
+    },
+    {
       key: "createdAt",
       header: "Date",
       render: (m: StockMovement) =>
@@ -123,12 +155,73 @@ export default function Inventory() {
     },
   ];
 
+  const handleOrderLookup = () => {
+    setLookupError("");
+    setFoundOrder(null);
+
+    const order = mockOrders.find(
+      (o) => o.orderNumber.toLowerCase() === orderLookup.toLowerCase()
+    );
+
+    if (!order) {
+      setLookupError("Order not found");
+      return;
+    }
+
+    if (dispatchType === "fresh" && order.status !== "pending") {
+      const hasReplacementComplaint = mockComplaints.some(
+        (c) => c.orderId === order.id && c.resolution === "replacement"
+      );
+
+      if (!hasReplacementComplaint) {
+        setLookupError("This order is already dispatched. Select 'Replacement' if there's a replacement complaint.");
+        return;
+      }
+    }
+
+    if (dispatchType === "replacement") {
+      const hasReplacementComplaint = mockComplaints.some(
+        (c) => c.orderId === order.id && c.resolution === "replacement"
+      );
+
+      if (!hasReplacementComplaint) {
+        setLookupError("No replacement complaint found for this order.");
+        return;
+      }
+    }
+
+    setFoundOrder(order);
+  };
+
+  const handleManualDispatch = () => {
+    if (!foundOrder) return;
+    console.log("Manual dispatch:", {
+      order: foundOrder,
+      dispatchType,
+      courier: selectedCourier,
+      assignedTo,
+    });
+    setManualDispatchOpen(false);
+    resetDispatchForm();
+  };
+
+  const resetDispatchForm = () => {
+    setOrderLookup("");
+    setFoundOrder(null);
+    setLookupError("");
+    setDispatchType("fresh");
+    setSelectedCourier("");
+    setAssignedTo("");
+  };
+
   const totalInventoryValue = allVariants.reduce(
     (sum, v) => sum + v.stockQuantity * v.costPrice,
     0
   );
   const totalUnits = allVariants.reduce((sum, v) => sum + v.stockQuantity, 0);
   const lowStockCount = allVariants.filter((v) => v.stockQuantity < 20).length;
+
+  const inHouseCouriers = mockCouriers.filter((c) => c.type === "in_house");
 
   return (
     <div className="space-y-6">
@@ -142,7 +235,7 @@ export default function Inventory() {
             <PackagePlus className="h-4 w-4 mr-2" />
             Receive Stock
           </Button>
-          <Button variant="outline" data-testid="button-dispatch-stock">
+          <Button variant="outline" onClick={() => setManualDispatchOpen(true)} data-testid="button-manual-dispatch">
             <PackageMinus className="h-4 w-4 mr-2" />
             Manual Dispatch
           </Button>
@@ -235,6 +328,134 @@ export default function Inventory() {
           setReceiveModalOpen(false);
         }}
       />
+
+      <Dialog open={manualDispatchOpen} onOpenChange={(open) => {
+        setManualDispatchOpen(open);
+        if (!open) resetDispatchForm();
+      }}>
+        <DialogContent className="sm:max-w-lg" data-testid="modal-manual-dispatch">
+          <DialogHeader>
+            <DialogTitle>Manual Dispatch</DialogTitle>
+            <DialogDescription>
+              Look up an order and dispatch items manually
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Dispatch Type</Label>
+              <RadioGroup
+                value={dispatchType}
+                onValueChange={(v) => {
+                  setDispatchType(v as "fresh" | "replacement");
+                  setFoundOrder(null);
+                  setLookupError("");
+                }}
+                className="flex gap-4"
+              >
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="fresh" id="dispatch_fresh" />
+                  <Label htmlFor="dispatch_fresh" className="font-normal">Fresh Dispatch</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="replacement" id="dispatch_replacement" />
+                  <Label htmlFor="dispatch_replacement" className="font-normal">Replacement</Label>
+                </div>
+              </RadioGroup>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Order Number</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={orderLookup}
+                  onChange={(e) => setOrderLookup(e.target.value)}
+                  placeholder="Enter order number (e.g., ORD-2024-001)"
+                  data-testid="input-order-lookup"
+                />
+                <Button onClick={handleOrderLookup} variant="secondary" data-testid="button-lookup-order">
+                  <Search className="h-4 w-4" />
+                </Button>
+              </div>
+              {lookupError && (
+                <div className="flex items-center gap-2 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  {lookupError}
+                </div>
+              )}
+            </div>
+
+            {foundOrder && (
+              <>
+                <Separator />
+
+                <div className="p-3 bg-muted rounded-md space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">{foundOrder.orderNumber}</span>
+                    <Badge variant="secondary">{foundOrder.status}</Badge>
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {foundOrder.customerName} | {foundOrder.shippingAddress}
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-sm font-medium mb-2 block">Order Items</Label>
+                  <div className="space-y-2">
+                    {foundOrder.items.map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-2 border rounded-md">
+                        <div className="flex items-center gap-2">
+                          <Package className="h-4 w-4 text-muted-foreground" />
+                          <div>
+                            <p className="text-sm font-medium">{item.productName}</p>
+                            <p className="text-xs text-muted-foreground font-mono">
+                              {item.sku} | {item.color} | {item.size}
+                            </p>
+                          </div>
+                        </div>
+                        <Badge>Qty: {item.quantity}</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Assign to Employee</Label>
+                  <Select value={selectedCourier} onValueChange={setSelectedCourier}>
+                    <SelectTrigger data-testid="select-dispatch-employee">
+                      <SelectValue placeholder="Select internal courier" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {inHouseCouriers.map((courier) => (
+                        <SelectItem key={courier.id} value={courier.id}>
+                          {courier.contactPerson} ({courier.name})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setManualDispatchOpen(false);
+              resetDispatchForm();
+            }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleManualDispatch}
+              disabled={!foundOrder || !selectedCourier}
+              data-testid="button-confirm-manual-dispatch"
+            >
+              <Truck className="h-4 w-4 mr-2" />
+              Dispatch
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

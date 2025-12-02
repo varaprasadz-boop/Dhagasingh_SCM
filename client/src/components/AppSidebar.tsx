@@ -23,6 +23,8 @@ import {
   Settings,
   LogOut,
   ChevronDown,
+  UserCog,
+  PackageCheck,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useAuth, type UserRole } from "@/contexts/AuthContext";
@@ -46,10 +48,12 @@ const navItems: NavItem[] = [
   { icon: Package, label: "Products", path: "/products", roles: ["admin", "stock_management"] },
   { icon: ShoppingCart, label: "Orders", path: "/orders", roles: ["admin", "warehouse", "customer_support"] },
   { icon: Truck, label: "Inventory", path: "/inventory", roles: ["admin", "warehouse", "stock_management"] },
+  { icon: PackageCheck, label: "Internal Delivery", path: "/internal-delivery", roles: ["admin", "warehouse"] },
   { icon: Users, label: "Suppliers", path: "/suppliers", roles: ["admin", "stock_management"] },
   { icon: Building2, label: "Couriers", path: "/couriers", roles: ["admin", "warehouse"] },
   { icon: MessageSquare, label: "Complaints", path: "/complaints", roles: ["admin", "customer_support"] },
   { icon: FileBarChart, label: "Reports", path: "/reports", roles: ["admin"] },
+  { icon: UserCog, label: "Users", path: "/users", roles: ["admin"] },
   { icon: Settings, label: "Settings", path: "/settings", roles: ["admin"] },
 ];
 
@@ -95,7 +99,7 @@ export function AppSidebar() {
                       <Link
                         href={item.path}
                         className="flex items-center gap-3"
-                        data-testid={`nav-${item.label.toLowerCase()}`}
+                        data-testid={`nav-${item.label.toLowerCase().replace(" ", "-")}`}
                       >
                         <item.icon className="h-4 w-4" />
                         <span>{item.label}</span>

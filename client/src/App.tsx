@@ -20,6 +20,8 @@ import Couriers from "@/pages/Couriers";
 import Complaints from "@/pages/Complaints";
 import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
+import InternalDelivery from "@/pages/InternalDelivery";
+import UserManagement from "@/pages/UserManagement";
 import NotFound from "@/pages/not-found";
 
 import MobileDashboard from "@/pages/MobileDashboard";
@@ -40,6 +42,8 @@ function DesktopRouter() {
       <Route path="/complaints" component={Complaints} />
       <Route path="/reports" component={Reports} />
       <Route path="/settings" component={Settings} />
+      <Route path="/internal-delivery" component={InternalDelivery} />
+      <Route path="/users" component={UserManagement} />
       <Route component={NotFound} />
     </Switch>
   );

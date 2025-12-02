@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,21 +29,39 @@ export default function Suppliers() {
     name: "",
     email: "",
     phone: "",
+    alternatePhone: "",
     address: "",
+    gstNumber: "",
     status: "active" as "active" | "inactive",
   });
 
   const filteredSuppliers = suppliers.filter(
     (s) =>
       s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.email.toLowerCase().includes(searchQuery.toLowerCase())
+      s.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (s.gstNumber && s.gstNumber.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const columns = [
     { key: "name", header: "Name", sortable: true },
     { key: "email", header: "Email" },
     { key: "phone", header: "Phone" },
-    { key: "address", header: "Address" },
+    {
+      key: "gstNumber",
+      header: "GST Number",
+      render: (s: Supplier) => (
+        <span className="font-mono text-xs">{s.gstNumber || "-"}</span>
+      ),
+    },
+    {
+      key: "address",
+      header: "Address",
+      render: (s: Supplier) => (
+        <span className="text-sm text-muted-foreground truncate max-w-[150px] block">
+          {s.address || "-"}
+        </span>
+      ),
+    },
     {
       key: "status",
       header: "Status",
@@ -86,7 +105,9 @@ export default function Suppliers() {
       name: supplier.name,
       email: supplier.email,
       phone: supplier.phone,
-      address: supplier.address,
+      alternatePhone: supplier.alternatePhone || "",
+      address: supplier.address || "",
+      gstNumber: supplier.gstNumber || "",
       status: supplier.status,
     });
     setDialogOpen(true);
@@ -113,12 +134,24 @@ export default function Suppliers() {
 
     setDialogOpen(false);
     setEditingSupplier(null);
-    setFormData({ name: "", email: "", phone: "", address: "", status: "active" });
+    resetForm();
+  };
+
+  const resetForm = () => {
+    setFormData({
+      name: "",
+      email: "",
+      phone: "",
+      alternatePhone: "",
+      address: "",
+      gstNumber: "",
+      status: "active",
+    });
   };
 
   const handleOpenCreate = () => {
     setEditingSupplier(null);
-    setFormData({ name: "", email: "", phone: "", address: "", status: "active" });
+    resetForm();
     setDialogOpen(true);
   };
 
@@ -136,7 +169,7 @@ export default function Suppliers() {
       </div>
 
       <SearchInput
-        placeholder="Search suppliers..."
+        placeholder="Search suppliers, GST..."
         value={searchQuery}
         onChange={setSearchQuery}
         className="max-w-md"
@@ -155,15 +188,18 @@ export default function Suppliers() {
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent data-testid="modal-supplier">
+        <DialogContent className="sm:max-w-lg" data-testid="modal-supplier">
           <DialogHeader>
             <DialogTitle>
               {editingSupplier ? "Edit Supplier" : "Add Supplier"}
             </DialogTitle>
+            <DialogDescription>
+              {editingSupplier ? "Update supplier information" : "Add a new supplier to your list"}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Company Name</Label>
+              <Label>Company Name *</Label>
               <Input
                 value={formData.name}
                 onChange={(e) =>
@@ -173,9 +209,10 @@ export default function Suppliers() {
                 data-testid="input-supplier-name"
               />
             </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Email</Label>
+                <Label>Email *</Label>
                 <Input
                   type="email"
                   value={formData.email}
@@ -187,7 +224,7 @@ export default function Suppliers() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Phone</Label>
+                <Label>Phone *</Label>
                 <Input
                   value={formData.phone}
                   onChange={(e) =>
@@ -198,8 +235,34 @@ export default function Suppliers() {
                 />
               </div>
             </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Alternate Phone (Optional)</Label>
+                <Input
+                  value={formData.alternatePhone}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, alternatePhone: e.target.value }))
+                  }
+                  placeholder="+91 98765 43211"
+                  data-testid="input-supplier-alt-phone"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>GST Number (Optional)</Label>
+                <Input
+                  value={formData.gstNumber}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, gstNumber: e.target.value.toUpperCase() }))
+                  }
+                  placeholder="27AABCT1234F1ZP"
+                  data-testid="input-supplier-gst"
+                />
+              </div>
+            </div>
+
             <div className="space-y-2">
-              <Label>Address</Label>
+              <Label>Address (Optional)</Label>
               <Textarea
                 value={formData.address}
                 onChange={(e) =>
@@ -209,6 +272,7 @@ export default function Suppliers() {
                 data-testid="input-supplier-address"
               />
             </div>
+
             <div className="flex items-center justify-between">
               <Label>Active Status</Label>
               <Switch
@@ -227,7 +291,11 @@ export default function Suppliers() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleSubmit} disabled={!formData.name} data-testid="button-submit-supplier">
+            <Button
+              onClick={handleSubmit}
+              disabled={!formData.name || !formData.email || !formData.phone}
+              data-testid="button-submit-supplier"
+            >
               {editingSupplier ? "Update" : "Add"} Supplier
             </Button>
           </DialogFooter>
