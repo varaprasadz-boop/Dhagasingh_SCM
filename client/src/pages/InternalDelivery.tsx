@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { DataTable } from "@/components/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
+import { SearchInput } from "@/components/SearchInput";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +37,7 @@ const statusLabels: Record<InternalDeliveryStatus, string> = {
 
 export default function InternalDeliveryPage() {
   const [deliveries, setDeliveries] = useState(mockInternalDeliveries);
+  const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<InternalDeliveryStatus | "all">("all");
   const [selectedDelivery, setSelectedDelivery] = useState<InternalDelivery | null>(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
@@ -43,9 +45,26 @@ export default function InternalDeliveryPage() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentCollectionMethod>("cash");
   const [collectedAmount, setCollectedAmount] = useState("");
 
-  const filteredDeliveries = activeTab === "all"
-    ? deliveries
-    : deliveries.filter((d) => d.status === activeTab);
+  const filteredDeliveries = useMemo(() => {
+    let result = deliveries;
+
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter((d) =>
+        d.orderNumber.toLowerCase().includes(query) ||
+        d.customerName.toLowerCase().includes(query) ||
+        d.customerPhone.includes(query) ||
+        d.shippingAddress.toLowerCase().includes(query) ||
+        d.assignedTo.toLowerCase().includes(query)
+      );
+    }
+
+    if (activeTab !== "all") {
+      result = result.filter((d) => d.status === activeTab);
+    }
+
+    return result;
+  }, [deliveries, searchQuery, activeTab]);
 
   const columns = [
     { key: "orderNumber", header: "Order #", sortable: true },
@@ -205,6 +224,14 @@ export default function InternalDeliveryPage() {
           </CardContent>
         </Card>
       </div>
+
+      <SearchInput
+        placeholder="Search orders, customers, address, employee..."
+        value={searchQuery}
+        onChange={setSearchQuery}
+        className="max-w-md"
+        data-testid="input-search-delivery"
+      />
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as InternalDeliveryStatus | "all")}>
         <TabsList>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { DataTable } from "@/components/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SearchInput } from "@/components/SearchInput";
@@ -33,13 +33,29 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { FileUp, Truck, Download, Filter, Eye, MapPin, Phone, Mail, Package } from "lucide-react";
+import { FileUp, Truck, Download, Eye, MapPin, Phone, Mail, Package, Clock, ArrowUpDown } from "lucide-react";
 import { mockOrders, mockCouriers, type Order, type OrderStatus } from "@/lib/mockData";
+
+type SortOption = "newest" | "oldest" | "amount_high" | "amount_low";
+
+function getAgeing(createdAt: string): number {
+  const created = new Date(createdAt);
+  const now = new Date();
+  const diffTime = Math.abs(now.getTime() - created.getTime());
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
+function formatAgeing(days: number): string {
+  if (days === 0) return "Today";
+  if (days === 1) return "1 day";
+  return `${days} days`;
+}
 
 export default function Orders() {
   const [orders, setOrders] = useState(mockOrders);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
+  const [sortOption, setSortOption] = useState<SortOption>("newest");
   const [selectedOrders, setSelectedOrders] = useState<Order[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -55,15 +71,34 @@ export default function Orders() {
     deliveryCost: "",
   });
 
-  const filteredOrders = orders.filter((order) => {
-    const matchesSearch =
-      order.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.customerEmail.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.shippingAddress.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "all" || order.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  const filteredAndSortedOrders = useMemo(() => {
+    let result = orders.filter((order) => {
+      const matchesSearch =
+        order.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        order.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        order.customerEmail.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        order.shippingAddress.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesStatus = statusFilter === "all" || order.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+
+    result = [...result].sort((a, b) => {
+      switch (sortOption) {
+        case "oldest":
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case "newest":
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case "amount_high":
+          return b.totalAmount - a.totalAmount;
+        case "amount_low":
+          return a.totalAmount - b.totalAmount;
+        default:
+          return 0;
+      }
+    });
+
+    return result;
+  }, [orders, searchQuery, statusFilter, sortOption]);
 
   const columns = [
     { key: "orderNumber", header: "Order #", sortable: true },
@@ -91,6 +126,31 @@ export default function Orders() {
       header: "Amount",
       sortable: true,
       render: (order: Order) => `₹${order.totalAmount}`,
+    },
+    {
+      key: "ageing",
+      header: "Ageing",
+      render: (order: Order) => {
+        const days = getAgeing(order.createdAt);
+        const colorClass = days > 7 
+          ? "text-red-500" 
+          : days > 3 
+            ? "text-orange-500" 
+            : "text-muted-foreground";
+        const textClass = days > 7 
+          ? "text-red-600 dark:text-red-400 font-medium" 
+          : days > 3 
+            ? "text-orange-600 dark:text-orange-400 font-medium" 
+            : "text-muted-foreground";
+        return (
+          <div className="flex items-center gap-1">
+            <Clock className={`h-3 w-3 ${colorClass}`} />
+            <span className={`text-sm ${textClass}`}>
+              {formatAgeing(days)}
+            </span>
+          </div>
+        );
+      },
     },
     {
       key: "paymentMethod",
@@ -260,6 +320,26 @@ export default function Orders() {
         </div>
       </div>
 
+      <Tabs value={statusFilter} onValueChange={(v) => setStatusFilter(v as OrderStatus | "all")}>
+        <TabsList className="flex-wrap" data-testid="tabs-order-status">
+          <TabsTrigger value="all" data-testid="tab-all">
+            All ({statusCounts.all})
+          </TabsTrigger>
+          <TabsTrigger value="pending" data-testid="tab-pending">
+            Pending ({statusCounts.pending})
+          </TabsTrigger>
+          <TabsTrigger value="dispatched" data-testid="tab-dispatched">
+            Dispatched ({statusCounts.dispatched})
+          </TabsTrigger>
+          <TabsTrigger value="delivered" data-testid="tab-delivered">
+            Delivered ({statusCounts.delivered})
+          </TabsTrigger>
+          <TabsTrigger value="rto" data-testid="tab-rto">
+            RTO ({statusCounts.rto})
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
       <div className="flex flex-col lg:flex-row gap-4">
         <SearchInput
           placeholder="Search orders, customers, address..."
@@ -267,20 +347,16 @@ export default function Orders() {
           onChange={setSearchQuery}
           className="lg:w-80"
         />
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v as OrderStatus | "all")}
-        >
-          <SelectTrigger className="w-full lg:w-48" data-testid="select-status-filter">
-            <Filter className="h-4 w-4 mr-2" />
-            <SelectValue placeholder="Filter by status" />
+        <Select value={sortOption} onValueChange={(v) => setSortOption(v as SortOption)}>
+          <SelectTrigger className="w-full lg:w-48" data-testid="select-sort-order">
+            <ArrowUpDown className="h-4 w-4 mr-2" />
+            <SelectValue placeholder="Sort by" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Orders ({statusCounts.all})</SelectItem>
-            <SelectItem value="pending">Pending ({statusCounts.pending})</SelectItem>
-            <SelectItem value="dispatched">Dispatched ({statusCounts.dispatched})</SelectItem>
-            <SelectItem value="delivered">Delivered ({statusCounts.delivered})</SelectItem>
-            <SelectItem value="rto">RTO ({statusCounts.rto})</SelectItem>
+            <SelectItem value="newest">Newest First</SelectItem>
+            <SelectItem value="oldest">Oldest First (Ageing)</SelectItem>
+            <SelectItem value="amount_high">Amount: High to Low</SelectItem>
+            <SelectItem value="amount_low">Amount: Low to High</SelectItem>
           </SelectContent>
         </Select>
 
@@ -300,7 +376,7 @@ export default function Orders() {
       <Card>
         <CardContent className="p-0">
           <DataTable
-            data={filteredOrders}
+            data={filteredAndSortedOrders}
             columns={columns}
             selectable
             getRowId={(order) => order.id}
@@ -326,6 +402,11 @@ export default function Orders() {
               </SheetHeader>
 
               <div className="space-y-6 mt-6">
+                <div className="flex items-center gap-2 p-2 bg-muted rounded-md">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm">Order Age: <strong>{formatAgeing(getAgeing(selectedOrder.createdAt))}</strong></span>
+                </div>
+
                 <div>
                   <h3 className="text-sm font-semibold text-muted-foreground mb-2">CUSTOMER DETAILS</h3>
                   <div className="space-y-2">

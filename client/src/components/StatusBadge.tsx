@@ -1,8 +1,8 @@
 import { Badge } from "@/components/ui/badge";
-import type { OrderStatus } from "@/lib/mockData";
+import type { OrderStatus, InternalDeliveryStatus } from "@/lib/mockData";
 
 interface StatusBadgeProps {
-  status: OrderStatus | "open" | "in_progress" | "resolved" | "rejected" | "active" | "inactive";
+  status: OrderStatus | InternalDeliveryStatus | "open" | "in_progress" | "resolved" | "rejected" | "active" | "inactive";
   className?: string;
 }
 
@@ -19,6 +19,9 @@ const statusConfig: Record<string, { label: string; variant: "default" | "second
   rejected: { label: "REJECTED", variant: "outline" },
   active: { label: "ACTIVE", variant: "default" },
   inactive: { label: "INACTIVE", variant: "secondary" },
+  assigned: { label: "ASSIGNED", variant: "secondary" },
+  out_for_delivery: { label: "OUT FOR DELIVERY", variant: "default" },
+  payment_collected: { label: "PAYMENT COLLECTED", variant: "default" },
 };
 
 export function StatusBadge({ status, className }: StatusBadgeProps) {
