@@ -934,6 +934,90 @@ export async function registerRoutes(
     }
   });
 
+  // Batch stock receive - handles multiple products with multiple variants per invoice
+  app.post("/api/stock-movements/batch-receive", authMiddleware, requirePermission(PERMISSION_CODES.ADJUST_STOCK), async (req, res) => {
+    try {
+      const { supplierId, invoiceNumber, invoiceDate, products } = req.body;
+
+      if (!supplierId || !products || !Array.isArray(products)) {
+        return res.status(400).json({ error: "Supplier and products are required" });
+      }
+
+      const movements: any[] = [];
+      let totalUnits = 0;
+      let totalValue = 0;
+
+      for (const product of products) {
+        const { productId, variants } = product;
+        
+        if (!variants || typeof variants !== "object") continue;
+
+        for (const [variantId, variantData] of Object.entries(variants)) {
+          const { quantity, costPrice } = variantData as { quantity: number; costPrice: string };
+          
+          if (!quantity || quantity <= 0) continue;
+
+          const variant = await storage.getProductVariantById(variantId);
+          if (!variant) {
+            console.log(`Variant ${variantId} not found, skipping`);
+            continue;
+          }
+
+          const previousQuantity = variant.stockQuantity;
+          await storage.updateStock(variantId, quantity, "inward");
+          const updatedVariant = await storage.getProductVariantById(variantId);
+
+          // Update the variant's cost price if provided
+          const cost = parseFloat(costPrice) || 0;
+          if (cost > 0) {
+            await storage.updateProductVariant(variantId, { costPrice: costPrice });
+          }
+
+          const movement = await storage.createStockMovement({
+            productVariantId: variantId,
+            type: "inward",
+            quantity,
+            previousQuantity,
+            newQuantity: updatedVariant!.stockQuantity,
+            supplierId,
+            invoiceNumber,
+            invoiceDate: invoiceDate ? new Date(invoiceDate) : undefined,
+            costPrice: costPrice || undefined,
+            reason: `Stock received via invoice ${invoiceNumber || "N/A"}`,
+            createdBy: req.user!.id,
+          });
+
+          movements.push(movement);
+          totalUnits += quantity;
+          totalValue += quantity * cost;
+
+          await storage.createAuditLog({
+            userId: req.user!.id,
+            action: "stock_inward",
+            module: "inventory",
+            entityId: variantId,
+            entityType: "product_variant",
+            oldData: { stockQuantity: previousQuantity },
+            newData: { stockQuantity: updatedVariant!.stockQuantity, costPrice },
+          });
+        }
+      }
+
+      res.status(201).json({
+        success: true,
+        movements,
+        summary: {
+          totalMovements: movements.length,
+          totalUnits,
+          totalValue,
+        },
+      });
+    } catch (error) {
+      console.error("Batch stock receive error:", error);
+      res.status(500).json({ error: "Failed to receive stock" });
+    }
+  });
+
   app.get("/api/complaints", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_COMPLAINTS), async (req, res) => {
     const filters: any = {};
     if (req.query.status) filters.status = req.query.status;

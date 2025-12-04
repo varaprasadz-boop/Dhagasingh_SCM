@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 import {
   Dialog,
   DialogContent,
@@ -21,14 +22,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FileUpload } from "./FileUpload";
-import { Plus, Trash2, Package, Loader2 } from "lucide-react";
+import { Plus, Trash2, Package, Loader2, Check } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import type { Supplier, ProductWithVariants } from "@shared/schema";
+
+interface VariantEntry {
+  quantity: number;
+  costPrice: string;
+}
 
 interface ProductEntry {
   id: string;
   productId: string;
-  quantities: Record<string, number>;
-  costPrice: string;
+  variants: Record<string, VariantEntry>;
 }
 
 export interface ReceiveStockData {
@@ -46,12 +52,13 @@ interface ReceiveStockModalProps {
 }
 
 export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStockModalProps) {
+  const { toast } = useToast();
   const [selectedSupplier, setSelectedSupplier] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split("T")[0]);
   const [invoicePhoto, setInvoicePhoto] = useState<File | null>(null);
   const [productEntries, setProductEntries] = useState<ProductEntry[]>([
-    { id: "1", productId: "", quantities: {}, costPrice: "" },
+    { id: "1", productId: "", variants: {} },
   ]);
 
   const { data: suppliers = [] } = useQuery<Supplier[]>({
@@ -64,12 +71,43 @@ export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStoc
     enabled: open,
   });
 
+  const batchReceiveMutation = useMutation({
+    mutationFn: async (data: {
+      supplierId: string;
+      invoiceNumber: string;
+      invoiceDate: string;
+      products: ProductEntry[];
+    }) => {
+      const response = await apiRequest("POST", "/api/stock-movements/batch-receive", data);
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      const summary = data?.summary || { totalUnits: 0, totalValue: 0 };
+      toast({
+        title: "Stock Received Successfully",
+        description: `${summary.totalUnits} units received (₹${summary.totalValue.toFixed(2)} total)`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stock-movements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      resetForm();
+      onOpenChange(false);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to receive stock",
+        variant: "destructive",
+      });
+    },
+  });
+
   const activeSuppliers = suppliers.filter((s) => s.status === "active");
 
   const addProduct = () => {
     setProductEntries((prev) => [
       ...prev,
-      { id: String(Date.now()), productId: "", quantities: {}, costPrice: "" },
+      { id: String(Date.now()), productId: "", variants: {} },
     ]);
   };
 
@@ -85,13 +123,40 @@ export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStoc
     );
   };
 
-  const updateVariantQuantity = (productEntryId: string, variantId: string, qty: number) => {
+  const updateVariant = (
+    productEntryId: string,
+    variantId: string,
+    field: "quantity" | "costPrice",
+    value: number | string
+  ) => {
     setProductEntries((prev) =>
-      prev.map((p) =>
-        p.id === productEntryId
-          ? { ...p, quantities: { ...p.quantities, [variantId]: qty } }
-          : p
-      )
+      prev.map((p) => {
+        if (p.id !== productEntryId) return p;
+        const existingVariant = p.variants[variantId] || { quantity: 0, costPrice: "" };
+        return {
+          ...p,
+          variants: {
+            ...p.variants,
+            [variantId]: { ...existingVariant, [field]: value },
+          },
+        };
+      })
+    );
+  };
+
+  const initializeVariantsWithDefaultPrice = (productEntryId: string, productId: string) => {
+    const productData = products.find((p) => p.id === productId);
+    if (!productData) return;
+
+    setProductEntries((prev) =>
+      prev.map((p) => {
+        if (p.id !== productEntryId) return p;
+        const newVariants: Record<string, VariantEntry> = {};
+        productData.variants.forEach((v) => {
+          newVariants[v.id] = { quantity: 0, costPrice: v.costPrice || "" };
+        });
+        return { ...p, productId, variants: newVariants };
+      })
     );
   };
 
@@ -100,13 +165,20 @@ export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStoc
   };
 
   const getTotalQuantity = (entry: ProductEntry) => {
-    return Object.values(entry.quantities).reduce((sum, qty) => sum + (qty || 0), 0);
+    if (!entry.variants || Object.keys(entry.variants).length === 0) return 0;
+    return Object.values(entry.variants).reduce((sum, v) => {
+      const qty = typeof v.quantity === 'number' ? v.quantity : (parseInt(String(v.quantity)) || 0);
+      return sum + qty;
+    }, 0);
   };
 
   const getTotalCost = (entry: ProductEntry) => {
-    const qty = getTotalQuantity(entry);
-    const cost = parseFloat(entry.costPrice) || 0;
-    return qty * cost;
+    if (!entry.variants || Object.keys(entry.variants).length === 0) return 0;
+    return Object.values(entry.variants).reduce((sum, v) => {
+      const qty = typeof v.quantity === 'number' ? v.quantity : (parseInt(String(v.quantity)) || 0);
+      const cost = parseFloat(String(v.costPrice)) || 0;
+      return sum + qty * cost;
+    }, 0);
   };
 
   const grandTotal = productEntries.reduce((sum, p) => sum + getTotalCost(p), 0);
@@ -115,16 +187,30 @@ export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStoc
   const handleSubmit = () => {
     if (!selectedSupplier || productEntries.every((p) => !p.productId)) return;
 
-    onReceive?.({
+    // Filter products that have at least one variant with quantity > 0
+    const validProducts = productEntries.filter((p) => {
+      if (!p.productId || !p.variants) return false;
+      return Object.values(p.variants).some((v) => {
+        const qty = typeof v.quantity === 'number' ? v.quantity : (parseInt(String(v.quantity)) || 0);
+        return qty > 0;
+      });
+    });
+    
+    if (validProducts.length === 0) {
+      toast({
+        title: "No items to receive",
+        description: "Please enter quantity for at least one variant",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    batchReceiveMutation.mutate({
       supplierId: selectedSupplier,
       invoiceNumber,
       invoiceDate,
-      invoicePhoto: invoicePhoto || undefined,
-      products: productEntries.filter((p) => p.productId && getTotalQuantity(p) > 0),
+      products: validProducts,
     });
-
-    resetForm();
-    onOpenChange(false);
   };
 
   const resetForm = () => {
@@ -132,7 +218,7 @@ export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStoc
     setInvoiceNumber("");
     setInvoiceDate(new Date().toISOString().split("T")[0]);
     setInvoicePhoto(null);
-    setProductEntries([{ id: "1", productId: "", quantities: {}, costPrice: "" }]);
+    setProductEntries([{ id: "1", productId: "", variants: {} }]);
   };
 
   return (
@@ -245,75 +331,108 @@ export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStoc
                         )}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Product</Label>
-                          <Select
-                            value={entry.productId}
-                            onValueChange={(v) => updateProduct(entry.id, "productId", v)}
-                          >
-                            <SelectTrigger data-testid={`select-product-${index}`}>
-                              <SelectValue placeholder="Select product" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {products.map((product) => (
-                                <SelectItem key={product.id} value={product.id}>
-                                  {product.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Cost Price per Unit (₹)</Label>
-                          <Input
-                            type="number"
-                            value={entry.costPrice}
-                            onChange={(e) => updateProduct(entry.id, "costPrice", e.target.value)}
-                            placeholder="Enter cost price"
-                            data-testid={`input-cost-price-${index}`}
-                          />
-                        </div>
+                      <div className="space-y-2">
+                        <Label>Product</Label>
+                        <Select
+                          value={entry.productId}
+                          onValueChange={(v) => initializeVariantsWithDefaultPrice(entry.id, v)}
+                        >
+                          <SelectTrigger data-testid={`select-product-${index}`}>
+                            <SelectValue placeholder="Select product" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {products.map((product) => (
+                              <SelectItem key={product.id} value={product.id}>
+                                {product.name} ({product.variants.length} variants)
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
 
                       {productData && productData.variants.length > 0 && (
-                        <div className="space-y-2">
-                          <Label className="text-sm">Variants (Color / Size)</Label>
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                            {productData.variants.map((variant) => (
-                              <div key={variant.id} className="flex items-center gap-2 p-2 border rounded-md">
-                                <div className="flex-1 text-sm">
-                                  <div className="flex items-center gap-1">
-                                    {variant.color && (
-                                      <div
-                                        className="w-3 h-3 rounded-full border"
-                                        style={{
-                                          backgroundColor:
-                                            variant.color.toLowerCase() === "white"
-                                              ? "#f8f8f8"
-                                              : variant.color.toLowerCase(),
-                                        }}
-                                      />
-                                    )}
-                                    <span>{variant.color || "-"}</span>
-                                    <span className="text-muted-foreground">/ {variant.size || "-"}</span>
-                                  </div>
-                                  <p className="text-xs text-muted-foreground font-mono">{variant.sku}</p>
-                                </div>
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  className="w-16 h-8 text-sm"
-                                  value={entry.quantities[variant.id] || ""}
-                                  onChange={(e) =>
-                                    updateVariantQuantity(entry.id, variant.id, parseInt(e.target.value) || 0)
-                                  }
-                                  placeholder="0"
-                                  data-testid={`input-qty-${variant.sku}`}
-                                />
-                              </div>
-                            ))}
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-sm">Variants (Color / Size)</Label>
+                            <span className="text-xs text-muted-foreground">
+                              Enter quantity and cost for each variant
+                            </span>
+                          </div>
+                          <div className="border rounded-lg overflow-hidden">
+                            <table className="w-full text-sm">
+                              <thead className="bg-muted/50">
+                                <tr>
+                                  <th className="text-left p-2 font-medium">Variant</th>
+                                  <th className="text-left p-2 font-medium">SKU</th>
+                                  <th className="text-center p-2 font-medium w-24">Qty</th>
+                                  <th className="text-center p-2 font-medium w-28">Cost (₹)</th>
+                                  <th className="text-right p-2 font-medium w-24">Total</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y">
+                                {productData.variants.map((variant) => {
+                                  const variantData = (entry.variants && entry.variants[variant.id]) || { quantity: 0, costPrice: "" };
+                                  const lineTotal = (variantData.quantity || 0) * (parseFloat(variantData.costPrice) || 0);
+                                  return (
+                                    <tr key={variant.id} className="hover:bg-muted/30">
+                                      <td className="p-2">
+                                        <div className="flex items-center gap-2">
+                                          {variant.color && (
+                                            <div
+                                              className="w-3 h-3 rounded-full border shrink-0"
+                                              style={{
+                                                backgroundColor:
+                                                  variant.color.toLowerCase() === "white"
+                                                    ? "#f8f8f8"
+                                                    : variant.color.toLowerCase(),
+                                              }}
+                                            />
+                                          )}
+                                          <span>
+                                            {variant.color || "-"} / {variant.size || "-"}
+                                          </span>
+                                        </div>
+                                      </td>
+                                      <td className="p-2">
+                                        <span className="font-mono text-xs text-muted-foreground">
+                                          {variant.sku}
+                                        </span>
+                                      </td>
+                                      <td className="p-2">
+                                        <Input
+                                          type="number"
+                                          min="0"
+                                          className="w-20 h-8 text-sm text-center"
+                                          value={variantData.quantity || ""}
+                                          onChange={(e) =>
+                                            updateVariant(entry.id, variant.id, "quantity", parseInt(e.target.value) || 0)
+                                          }
+                                          placeholder="0"
+                                          data-testid={`input-qty-${variant.sku}`}
+                                        />
+                                      </td>
+                                      <td className="p-2">
+                                        <Input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          className="w-24 h-8 text-sm text-center"
+                                          value={variantData.costPrice || ""}
+                                          onChange={(e) =>
+                                            updateVariant(entry.id, variant.id, "costPrice", e.target.value)
+                                          }
+                                          placeholder="0.00"
+                                          data-testid={`input-cost-${variant.sku}`}
+                                        />
+                                      </td>
+                                      <td className="p-2 text-right font-medium">
+                                        {lineTotal > 0 ? `₹${lineTotal.toFixed(2)}` : "-"}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
                           </div>
                         </div>
                       )}
@@ -352,15 +471,30 @@ export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStoc
         </ScrollArea>
 
         <DialogFooter className="mt-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)} data-testid="button-cancel-receive">
+          <Button 
+            variant="outline" 
+            onClick={() => onOpenChange(false)} 
+            disabled={batchReceiveMutation.isPending}
+            data-testid="button-cancel-receive"
+          >
             Cancel
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={!selectedSupplier || grandQuantity === 0}
+            disabled={!selectedSupplier || grandTotal === 0 || batchReceiveMutation.isPending}
             data-testid="button-confirm-receive"
           >
-            Receive Stock
+            {batchReceiveMutation.isPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Receiving...
+              </>
+            ) : (
+              <>
+                <Check className="mr-2 h-4 w-4" />
+                Receive Stock
+              </>
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

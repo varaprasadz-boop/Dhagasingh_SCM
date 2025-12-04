@@ -10,6 +10,14 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+**December 2024 - Enhanced Receive Stock with Per-Variant Pricing**
+- ReceiveStockModal now supports multiple products per invoice, each with multiple variants
+- Per-variant pricing: each variant can have individual quantity and cost price inputs in a table format
+- Created batch API endpoint (POST /api/stock-movements/batch-receive) for multi-product, multi-variant stock receipts
+- Real-time line totals and grand totals calculated as user enters data
+- Stock movement type uses "inward" enum value for receiving stock
+- Mutation properly parses JSON response and handles success/error states with toast notifications
+
 **December 2024 - Real API Integration Complete**
 - All desktop pages (Dashboard, Orders, Inventory, Reports, Complaints, Couriers, Internal Delivery, Products, Suppliers, User Management, Roles Management) now use real API data
 - All mobile pages (MobileDashboard, MobileOrders, MobileStock) now use real API data
