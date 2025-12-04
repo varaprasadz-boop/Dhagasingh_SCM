@@ -1,5 +1,6 @@
-import { db } from "./db";
+import { db, getBooleanValue } from "./db";
 import { eq, and, desc, asc, like, inArray, sql, or, isNull, gte, lte, count } from "drizzle-orm";
+import { randomUUID } from "crypto";
 import {
   users, roles, permissions, rolePermissions, sessions,
   suppliers, products, productVariants, courierPartners,
@@ -347,9 +348,11 @@ class DatabaseStorage implements IStorage {
       const result = queryResult?.[0];
       if (!result) return undefined;
 
+      const isSuperAdmin = await getBooleanValue('users', 'is_super_admin', 'id', id);
       const role = result.roles ? await this.getRoleWithPermissions(result.roles.id) ?? null : null;
       return {
         ...result.users,
+        isSuperAdmin,
         role,
       };
     } catch (error) {
@@ -370,9 +373,11 @@ class DatabaseStorage implements IStorage {
       const result = queryResult?.[0];
       if (!result) return undefined;
 
+      const isSuperAdmin = await getBooleanValue('users', 'is_super_admin', 'id', result.users.id);
       const role = result.roles ? await this.getRoleWithPermissions(result.roles.id) ?? null : null;
       return {
         ...result.users,
+        isSuperAdmin,
         role,
       };
     } catch (error) {
@@ -384,10 +389,20 @@ class DatabaseStorage implements IStorage {
   async createUser(user: Omit<InsertUser, "password"> & { plainPassword: string }): Promise<User> {
     const hashedPassword = await hash(user.plainPassword, SALT_ROUNDS);
     const { plainPassword, ...userData } = user;
-    const [created] = await db.insert(users)
-      .values({ ...userData, password: hashedPassword })
-      .returning();
-    return created;
+    const userId = randomUUID();
+    
+    await db.insert(users)
+      .values({ id: userId, ...userData, password: hashedPassword });
+    
+    const result = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const created = result?.[0];
+    
+    if (!created) {
+      throw new Error("Failed to create user");
+    }
+    
+    const isSuperAdmin = await getBooleanValue('users', 'is_super_admin', 'id', userId);
+    return { ...created, isSuperAdmin };
   }
 
   async updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined> {
@@ -431,20 +446,31 @@ class DatabaseStorage implements IStorage {
 
   // Sessions
   async createSession(userId: string, expiresAt: Date): Promise<string> {
-    const [session] = await db.insert(sessions)
-      .values({ userId, expiresAt })
-      .returning();
-    return session.id;
+    try {
+      const sessionId = randomUUID();
+      await db.insert(sessions)
+        .values({ id: sessionId, userId, expiresAt });
+      return sessionId;
+    } catch (error) {
+      console.log("Error creating session:", error);
+      throw error;
+    }
   }
 
   async getSession(sessionId: string): Promise<{ userId: string; expiresAt: Date } | undefined> {
-    const [session] = await db.select()
-      .from(sessions)
-      .where(eq(sessions.id, sessionId))
-      .limit(1);
-    
-    if (!session) return undefined;
-    return { userId: session.userId, expiresAt: session.expiresAt };
+    try {
+      const result = await db.select()
+        .from(sessions)
+        .where(eq(sessions.id, sessionId))
+        .limit(1);
+      
+      const session = result?.[0];
+      if (!session) return undefined;
+      return { userId: session.userId, expiresAt: session.expiresAt };
+    } catch (error) {
+      console.log(`Error getting session ${sessionId}:`, error);
+      return undefined;
+    }
   }
 
   async deleteSession(sessionId: string): Promise<boolean> {

@@ -48,6 +48,7 @@ Preferred communication style: Simple, everyday language.
 - PostgreSQL as the primary database (configured via @neondatabase/serverless)
 - Schema-first approach with Drizzle-Zod integration for runtime validation
 - Memory storage implementation (MemStorage) for development/testing with interface-based design for easy database swapping
+- **Important**: Neon HTTP driver has a known issue with boolean type mapping where PostgreSQL 't'/'f' values are incorrectly converted to JavaScript `false`. Use raw SQL with `::text` cast and `getBooleanValue()` helper function in `server/db.ts` to get correct boolean values.
 
 **API Design**
 - RESTful API pattern with `/api` prefix for all application routes
