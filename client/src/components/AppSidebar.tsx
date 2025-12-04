@@ -25,9 +25,10 @@ import {
   ChevronDown,
   UserCog,
   PackageCheck,
+  Shield,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
-import { useAuth, type UserRole } from "@/contexts/AuthContext";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,42 +36,50 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 interface NavItem {
   icon: typeof LayoutDashboard;
   label: string;
   path: string;
-  roles: UserRole[];
+  permission?: string;
+  superAdminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
-  { icon: LayoutDashboard, label: "Dashboard", path: "/", roles: ["admin", "warehouse", "customer_support", "stock_management"] },
-  { icon: Package, label: "Products", path: "/products", roles: ["admin", "stock_management"] },
-  { icon: ShoppingCart, label: "Orders", path: "/orders", roles: ["admin", "warehouse", "customer_support"] },
-  { icon: Truck, label: "Inventory", path: "/inventory", roles: ["admin", "warehouse", "stock_management"] },
-  { icon: PackageCheck, label: "Internal Delivery", path: "/internal-delivery", roles: ["admin", "warehouse"] },
-  { icon: Users, label: "Suppliers", path: "/suppliers", roles: ["admin", "stock_management"] },
-  { icon: Building2, label: "Couriers", path: "/couriers", roles: ["admin", "warehouse"] },
-  { icon: MessageSquare, label: "Complaints", path: "/complaints", roles: ["admin", "customer_support"] },
-  { icon: FileBarChart, label: "Reports", path: "/reports", roles: ["admin"] },
-  { icon: UserCog, label: "Users", path: "/users", roles: ["admin"] },
-  { icon: Settings, label: "Settings", path: "/settings", roles: ["admin"] },
+  { icon: LayoutDashboard, label: "Dashboard", path: "/", permission: "view_dashboard" },
+  { icon: Package, label: "Products", path: "/products", permission: "view_products" },
+  { icon: ShoppingCart, label: "Orders", path: "/orders", permission: "view_orders" },
+  { icon: Truck, label: "Inventory", path: "/inventory", permission: "view_inventory" },
+  { icon: PackageCheck, label: "Internal Delivery", path: "/internal-delivery", permission: "view_deliveries" },
+  { icon: Users, label: "Suppliers", path: "/suppliers", permission: "view_suppliers" },
+  { icon: Building2, label: "Couriers", path: "/couriers", permission: "view_couriers" },
+  { icon: MessageSquare, label: "Complaints", path: "/complaints", permission: "view_complaints" },
+  { icon: FileBarChart, label: "Reports", path: "/reports", permission: "view_reports" },
+  { icon: UserCog, label: "Users", path: "/users", permission: "manage_users" },
+  { icon: Shield, label: "Roles", path: "/roles", superAdminOnly: true },
+  { icon: Settings, label: "Settings", path: "/settings", permission: "manage_settings" },
 ];
-
-const roleLabels: Record<UserRole, string> = {
-  admin: "Administrator",
-  warehouse: "Warehouse",
-  customer_support: "Customer Support",
-  stock_management: "Stock Management",
-};
 
 export function AppSidebar() {
   const [location] = useLocation();
-  const { user, setRole, logout } = useAuth();
+  const { user, isSuperAdmin, hasPermission, logout } = useAuth();
 
-  const filteredItems = user
-    ? navItems.filter((item) => item.roles.includes(user.role))
-    : [];
+  const filteredItems = navItems.filter((item) => {
+    if (item.superAdminOnly) {
+      return isSuperAdmin;
+    }
+    if (item.permission) {
+      return hasPermission(item.permission);
+    }
+    return true;
+  });
+
+  const getRoleName = () => {
+    if (isSuperAdmin) return "Super Admin";
+    if (user?.role) return user.role.name;
+    return "User";
+  };
 
   return (
     <Sidebar>
@@ -121,26 +130,19 @@ export function AppSidebar() {
                 <Avatar className="h-8 w-8">
                   <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
                 </Avatar>
-                <div className="flex-1 text-left">
-                  <p className="text-sm font-medium">{user.name}</p>
-                  <p className="text-xs text-muted-foreground">{roleLabels[user.role]}</p>
+                <div className="flex-1 text-left min-w-0">
+                  <p className="text-sm font-medium truncate">{user.name}</p>
+                  <div className="flex items-center gap-1">
+                    <p className="text-xs text-muted-foreground truncate">{getRoleName()}</p>
+                    {isSuperAdmin && (
+                      <Badge variant="secondary" className="text-[10px] h-4 px-1">Super</Badge>
+                    )}
+                  </div>
                 </div>
-                <ChevronDown className="h-4 w-4" />
+                <ChevronDown className="h-4 w-4 shrink-0" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56">
-              <DropdownMenuItem onClick={() => setRole("admin")} data-testid="menu-role-admin">
-                Switch to Admin
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setRole("warehouse")} data-testid="menu-role-warehouse">
-                Switch to Warehouse
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setRole("customer_support")} data-testid="menu-role-support">
-                Switch to Customer Support
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setRole("stock_management")} data-testid="menu-role-stock">
-                Switch to Stock Management
-              </DropdownMenuItem>
               <DropdownMenuItem onClick={logout} data-testid="menu-logout">
                 <LogOut className="h-4 w-4 mr-2" />
                 Logout

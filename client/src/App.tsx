@@ -22,6 +22,8 @@ import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
 import InternalDelivery from "@/pages/InternalDelivery";
 import UserManagement from "@/pages/UserManagement";
+import RolesManagement from "@/pages/RolesManagement";
+import Login from "@/pages/Login";
 import NotFound from "@/pages/not-found";
 
 import MobileDashboard from "@/pages/MobileDashboard";
@@ -44,6 +46,7 @@ function DesktopRouter() {
       <Route path="/settings" component={Settings} />
       <Route path="/internal-delivery" component={InternalDelivery} />
       <Route path="/users" component={UserManagement} />
+      <Route path="/roles" component={RolesManagement} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -97,9 +100,9 @@ function MobileLayout() {
 
 function AppContent() {
   const { isMobileView } = useMobile();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
 
-  if (!isAuthenticated) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
@@ -108,6 +111,10 @@ function AppContent() {
         </div>
       </div>
     );
+  }
+
+  if (!isAuthenticated) {
+    return <Login />;
   }
 
   return isMobileView ? <MobileLayout /> : <DesktopLayout />;
