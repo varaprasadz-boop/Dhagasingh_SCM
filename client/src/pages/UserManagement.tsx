@@ -1,9 +1,10 @@
 import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { DataTable } from "@/components/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SearchInput } from "@/components/SearchInput";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -23,44 +24,102 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Edit, Trash2, Shield, Users, UserCheck, Package } from "lucide-react";
-import { mockUsers, type User } from "@/lib/mockData";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Plus, Edit, Trash2, Users, Shield } from "lucide-react";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import type { Role } from "@shared/schema";
 
-type UserRole = "admin" | "warehouse" | "customer_support" | "stock_management";
-
-const roleLabels: Record<UserRole, string> = {
-  admin: "Administrator",
-  warehouse: "Warehouse",
-  customer_support: "Customer Support",
-  stock_management: "Stock Management",
-};
-
-const roleColors: Record<UserRole, string> = {
-  admin: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
-  warehouse: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-  customer_support: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-  stock_management: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
-};
+interface UserData {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  roleId: string;
+  status: "active" | "inactive";
+  isSuperAdmin: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+  role?: Role;
+}
 
 export default function UserManagement() {
-  const [users, setUsers] = useState(mockUsers);
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editingUser, setEditingUser] = useState<UserData | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<UserData | null>(null);
 
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     phone: "",
-    role: "customer_support" as UserRole,
+    password: "",
+    roleId: "",
     status: "active" as "active" | "inactive",
+  });
+
+  const { data: users = [], isLoading: usersLoading } = useQuery<UserData[]>({
+    queryKey: ["/api/users"],
+  });
+
+  const { data: roles = [], isLoading: rolesLoading } = useQuery<Role[]>({
+    queryKey: ["/api/roles"],
+  });
+
+  const createUserMutation = useMutation({
+    mutationFn: async (data: typeof formData) => {
+      return apiRequest("POST", "/api/users", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      setDialogOpen(false);
+      resetForm();
+      toast({ title: "User created successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to create user", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const updateUserMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Partial<typeof formData> }) => {
+      const { password, ...updateData } = data;
+      return apiRequest("PATCH", `/api/users/${id}`, updateData);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      setDialogOpen(false);
+      setEditingUser(null);
+      resetForm();
+      toast({ title: "User updated successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to update user", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/users/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      setDeleteConfirmOpen(false);
+      setUserToDelete(null);
+      toast({ title: "User deleted successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to delete user", description: error.message, variant: "destructive" });
+    },
   });
 
   const filteredUsers = users.filter(
     (u) =>
       u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      roleLabels[u.role].toLowerCase().includes(searchQuery.toLowerCase())
+      u.role?.name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const columns = [
@@ -70,31 +129,40 @@ export default function UserManagement() {
     {
       key: "role",
       header: "Role",
-      render: (u: User) => (
-        <Badge className={roleColors[u.role]} variant="secondary">
-          {roleLabels[u.role]}
-        </Badge>
+      render: (u: UserData) => (
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary">
+            {u.role?.name || "No Role"}
+          </Badge>
+          {u.isSuperAdmin && (
+            <Badge variant="default" className="bg-purple-600">
+              Super Admin
+            </Badge>
+          )}
+        </div>
       ),
     },
     {
       key: "status",
       header: "Status",
-      render: (u: User) => <StatusBadge status={u.status} />,
+      render: (u: UserData) => <StatusBadge status={u.status} />,
     },
     {
       key: "createdAt",
       header: "Created",
-      render: (u: User) =>
-        new Date(u.createdAt).toLocaleDateString("en-IN", {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-        }),
+      render: (u: UserData) =>
+        u.createdAt
+          ? new Date(u.createdAt).toLocaleDateString("en-IN", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            })
+          : "-",
     },
     {
       key: "actions",
       header: "",
-      render: (u: User) => (
+      render: (u: UserData) => (
         <div className="flex gap-1">
           <Button
             variant="ghost"
@@ -107,57 +175,54 @@ export default function UserManagement() {
           >
             <Edit className="h-4 w-4" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleDelete(u.id);
-            }}
-            data-testid={`button-delete-user-${u.id}`}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          {!u.isSuperAdmin && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteClick(u);
+              }}
+              data-testid={`button-delete-user-${u.id}`}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       ),
     },
   ];
 
-  const handleEdit = (user: User) => {
+  const handleEdit = (user: UserData) => {
     setEditingUser(user);
     setFormData({
       name: user.name,
       email: user.email,
       phone: user.phone,
-      role: user.role,
+      password: "",
+      roleId: user.roleId,
       status: user.status,
     });
     setDialogOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    setUsers((prev) => prev.filter((u) => u.id !== id));
+  const handleDeleteClick = (user: UserData) => {
+    setUserToDelete(user);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleDelete = () => {
+    if (userToDelete) {
+      deleteUserMutation.mutate(userToDelete.id);
+    }
   };
 
   const handleSubmit = () => {
     if (editingUser) {
-      setUsers((prev) =>
-        prev.map((u) =>
-          u.id === editingUser.id ? { ...u, ...formData } : u
-        )
-      );
+      updateUserMutation.mutate({ id: editingUser.id, data: formData });
     } else {
-      const newUser: User = {
-        id: String(users.length + 1),
-        ...formData,
-        createdAt: new Date().toISOString(),
-      };
-      setUsers((prev) => [...prev, newUser]);
+      createUserMutation.mutate(formData);
     }
-
-    setDialogOpen(false);
-    setEditingUser(null);
-    resetForm();
   };
 
   const resetForm = () => {
@@ -165,7 +230,8 @@ export default function UserManagement() {
       name: "",
       email: "",
       phone: "",
-      role: "customer_support",
+      password: "",
+      roleId: "",
       status: "active",
     });
   };
@@ -176,18 +242,35 @@ export default function UserManagement() {
     setDialogOpen(true);
   };
 
-  const roleCounts = {
-    admin: users.filter((u) => u.role === "admin").length,
-    warehouse: users.filter((u) => u.role === "warehouse").length,
-    customer_support: users.filter((u) => u.role === "customer_support").length,
-    stock_management: users.filter((u) => u.role === "stock_management").length,
-  };
+  const activeCount = users.filter((u) => u.status === "active").length;
+  const superAdminCount = users.filter((u) => u.isSuperAdmin).length;
+
+  if (usersLoading || rolesLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="h-4 w-64 mt-2" />
+          </div>
+          <Skeleton className="h-10 w-28" />
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
+        </div>
+        <Skeleton className="h-10 w-80" />
+        <Skeleton className="h-64" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">User Management</h1>
+          <h1 className="text-2xl font-bold" data-testid="text-page-title">User Management</h1>
           <p className="text-muted-foreground">Manage users and their roles</p>
         </div>
         <Button onClick={handleOpenCreate} data-testid="button-add-user">
@@ -196,41 +279,32 @@ export default function UserManagement() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-blue-600" />
+              <p className="text-sm text-muted-foreground">Total Users</p>
+            </div>
+            <p className="text-2xl font-bold mt-1" data-testid="text-total-users">{users.length}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-green-600" />
+              <p className="text-sm text-muted-foreground">Active Users</p>
+            </div>
+            <p className="text-2xl font-bold mt-1" data-testid="text-active-users">{activeCount}</p>
+          </CardContent>
+        </Card>
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center gap-2">
               <Shield className="h-5 w-5 text-purple-600" />
-              <p className="text-sm text-muted-foreground">Admins</p>
+              <p className="text-sm text-muted-foreground">Super Admins</p>
             </div>
-            <p className="text-2xl font-bold mt-1">{roleCounts.admin}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2">
-              <Package className="h-5 w-5 text-blue-600" />
-              <p className="text-sm text-muted-foreground">Warehouse</p>
-            </div>
-            <p className="text-2xl font-bold mt-1">{roleCounts.warehouse}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2">
-              <UserCheck className="h-5 w-5 text-green-600" />
-              <p className="text-sm text-muted-foreground">Customer Support</p>
-            </div>
-            <p className="text-2xl font-bold mt-1">{roleCounts.customer_support}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-orange-600" />
-              <p className="text-sm text-muted-foreground">Stock Management</p>
-            </div>
-            <p className="text-2xl font-bold mt-1">{roleCounts.stock_management}</p>
+            <p className="text-2xl font-bold mt-1" data-testid="text-super-admins">{superAdminCount}</p>
           </CardContent>
         </Card>
       </div>
@@ -240,6 +314,7 @@ export default function UserManagement() {
         value={searchQuery}
         onChange={setSearchQuery}
         className="max-w-md"
+        data-testid="input-search-users"
       />
 
       <Card>
@@ -303,28 +378,43 @@ export default function UserManagement() {
               </div>
             </div>
 
+            {!editingUser && (
+              <div className="space-y-2">
+                <Label>Password *</Label>
+                <Input
+                  type="password"
+                  value={formData.password}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, password: e.target.value }))
+                  }
+                  placeholder="Minimum 6 characters"
+                  data-testid="input-user-password"
+                />
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label>Role *</Label>
               <Select
-                value={formData.role}
-                onValueChange={(v) => setFormData((prev) => ({ ...prev, role: v as UserRole }))}
+                value={formData.roleId}
+                onValueChange={(v) => setFormData((prev) => ({ ...prev, roleId: v }))}
               >
                 <SelectTrigger data-testid="select-user-role">
                   <SelectValue placeholder="Select role" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="admin">Administrator</SelectItem>
-                  <SelectItem value="warehouse">Warehouse</SelectItem>
-                  <SelectItem value="customer_support">Customer Support</SelectItem>
-                  <SelectItem value="stock_management">Stock Management</SelectItem>
+                  {roles.map((role) => (
+                    <SelectItem key={role.id} value={role.id}>
+                      {role.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground mt-1">
-                {formData.role === "admin" && "Full access to all features"}
-                {formData.role === "warehouse" && "Manage orders, inventory, and couriers"}
-                {formData.role === "customer_support" && "Handle orders and complaints"}
-                {formData.role === "stock_management" && "Manage products, inventory, and suppliers"}
-              </p>
+              {formData.roleId && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {roles.find((r) => r.id === formData.roleId)?.description}
+                </p>
+              )}
             </div>
 
             <div className="flex items-center justify-between">
@@ -347,10 +437,47 @@ export default function UserManagement() {
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={!formData.name || !formData.email || !formData.phone}
+              disabled={
+                !formData.name ||
+                !formData.email ||
+                !formData.phone ||
+                !formData.roleId ||
+                (!editingUser && !formData.password) ||
+                createUserMutation.isPending ||
+                updateUserMutation.isPending
+              }
               data-testid="button-submit-user"
             >
-              {editingUser ? "Update" : "Add"} User
+              {createUserMutation.isPending || updateUserMutation.isPending
+                ? "Saving..."
+                : editingUser
+                ? "Update"
+                : "Add"}{" "}
+              User
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent data-testid="modal-delete-confirm">
+          <DialogHeader>
+            <DialogTitle>Delete User</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete user "{userToDelete?.name}"? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleteUserMutation.isPending}
+              data-testid="button-confirm-delete"
+            >
+              {deleteUserMutation.isPending ? "Deleting..." : "Delete"}
             </Button>
           </DialogFooter>
         </DialogContent>

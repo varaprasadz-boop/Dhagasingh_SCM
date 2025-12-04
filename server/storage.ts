@@ -323,9 +323,11 @@ class DatabaseStorage implements IStorage {
 
       const usersWithRoles: UserWithRole[] = [];
       for (const row of (result || [])) {
+        const isSuperAdmin = await getBooleanValue('users', 'is_super_admin', 'id', row.users.id);
         const role = row.roles ? await this.getRoleWithPermissions(row.roles.id) ?? null : null;
         usersWithRoles.push({
           ...row.users,
+          isSuperAdmin,
           role,
         });
       }
@@ -410,7 +412,11 @@ class DatabaseStorage implements IStorage {
       .set({ ...user, updatedAt: new Date() })
       .where(eq(users.id, id))
       .returning();
-    return updated;
+    
+    if (!updated) return undefined;
+    
+    const isSuperAdmin = await getBooleanValue('users', 'is_super_admin', 'id', id);
+    return { ...updated, isSuperAdmin };
   }
 
   async deleteUser(id: string): Promise<boolean> {
