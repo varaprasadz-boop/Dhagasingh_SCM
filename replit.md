@@ -10,6 +10,17 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+**December 2024 - Bulk Import from Shopify CSV**
+- Added ProductImportModal and OrderImportModal for bulk imports from Shopify CSV exports
+- Products import (POST /api/products/import): Groups rows by Handle, creates products with variants, validates duplicate SKUs
+- Orders import (POST /api/orders/import): Groups rows by Order Name, creates orders with line items
+- Import modals feature: drag-drop file upload, data preview, validation errors, progress indication, import summary
+- Shopify CSV column mapping:
+  - Products: Handle, Title, Type, Vendor, Body (HTML), Option1/2/3 Name & Value, Variant SKU, Variant Price, Cost per item, Variant Inventory Qty
+  - Orders: Name, Email, Total, Financial Status, Fulfillment Status, Shipping fields, Lineitem fields
+- Duplicate SKU validation checks both within batch and against existing database records
+- CSV parsing utility at client/src/lib/shopifyImport.ts handles Shopify format parsing
+
 **December 2024 - Enhanced Receive Stock with Per-Variant Pricing**
 - ReceiveStockModal now supports multiple products per invoice, each with multiple variants
 - Per-variant pricing: each variant can have individual quantity and cost price inputs in a table format

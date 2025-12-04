@@ -569,6 +569,198 @@ export async function registerRoutes(
     res.json({ success: true });
   });
 
+  // Products bulk import from Shopify CSV
+  app.post("/api/products/import", authMiddleware, requirePermission(PERMISSION_CODES.IMPORT_PRODUCTS), async (req, res) => {
+    try {
+      const { csvData, fileName } = req.body;
+      
+      if (!csvData) {
+        return res.status(400).json({ error: "CSV data required" });
+      }
+
+      // Create bulk job for tracking
+      const job = await storage.createBulkUploadJob({
+        type: "products",
+        fileName: fileName || "products_import.csv",
+        status: "processing",
+        createdBy: req.user!.id,
+      });
+
+      const parsed = Papa.parse(csvData, { header: true, skipEmptyLines: true });
+      const rows = parsed.data as any[];
+
+      await storage.updateBulkUploadJob(job.id, { totalRows: rows.length });
+
+      const errors: any[] = [];
+      let successCount = 0;
+      const productGroups: { [handle: string]: any } = {};
+
+      // Get existing suppliers for vendor matching
+      const suppliers = await storage.getSuppliers();
+      const supplierByName = new Map(suppliers.map(s => [s.name.toLowerCase(), s]));
+
+      // Group rows by Handle (each Handle = one product with multiple variants)
+      for (const row of rows) {
+        const handle = row["Handle"]?.trim();
+        if (!handle) continue;
+
+        if (!productGroups[handle]) {
+          productGroups[handle] = {
+            name: row["Title"]?.trim() || handle,
+            description: row["Body (HTML)"] || null,
+            category: row["Type"] || null,
+            vendor: row["Vendor"] || null,
+            variants: [],
+          };
+        }
+
+        // Add variant if SKU exists
+        const sku = row["Variant SKU"]?.trim();
+        if (sku) {
+          // Extract color and size from options
+          let color: string | null = null;
+          let size: string | null = null;
+
+          const options = [
+            { name: row["Option1 Name"], value: row["Option1 Value"] },
+            { name: row["Option2 Name"], value: row["Option2 Value"] },
+            { name: row["Option3 Name"], value: row["Option3 Value"] },
+          ];
+
+          for (const opt of options) {
+            if (!opt.name || !opt.value) continue;
+            const nameLower = opt.name.toLowerCase();
+            if (nameLower.includes("color") || nameLower.includes("colour")) {
+              color = opt.value;
+            } else if (nameLower.includes("size")) {
+              size = opt.value;
+            }
+          }
+
+          productGroups[handle].variants.push({
+            sku,
+            color,
+            size,
+            costPrice: parseFloat(row["Cost per item"]) || 0,
+            sellingPrice: parseFloat(row["Variant Price"]) || 0,
+            stockQuantity: parseInt(row["Variant Inventory Qty"]) || 0,
+          });
+        }
+      }
+
+      // Get existing SKUs from database to check for duplicates
+      const existingVariants = await storage.getProductVariants();
+      const databaseSkus = new Set(existingVariants.map(v => v.sku));
+
+      // First pass: Check for all duplicate SKUs within the batch and against database
+      const batchSkuToHandle = new Map<string, string>();
+      const batchDuplicates: { handle: string; sku: string; conflictWith: string }[] = [];
+      
+      for (const handle of Object.keys(productGroups)) {
+        const productData = productGroups[handle];
+        for (const variant of productData.variants) {
+          const sku = variant.sku;
+          
+          // Check if SKU exists in database
+          if (databaseSkus.has(sku)) {
+            batchDuplicates.push({ handle, sku, conflictWith: "existing database" });
+          }
+          // Check if SKU was already seen in this batch
+          else if (batchSkuToHandle.has(sku)) {
+            batchDuplicates.push({ handle, sku, conflictWith: `product "${batchSkuToHandle.get(sku)}"` });
+          } else {
+            batchSkuToHandle.set(sku, handle);
+          }
+        }
+      }
+
+      // Group duplicate errors by handle for clearer error messages
+      const handleDuplicateErrors = new Map<string, string[]>();
+      for (const dup of batchDuplicates) {
+        if (!handleDuplicateErrors.has(dup.handle)) {
+          handleDuplicateErrors.set(dup.handle, []);
+        }
+        handleDuplicateErrors.get(dup.handle)!.push(`${dup.sku} (conflicts with ${dup.conflictWith})`);
+      }
+
+      // Mark products with duplicates as errors and build valid products set
+      const invalidHandles = new Set<string>();
+      for (const [handle, duplicateSkus] of handleDuplicateErrors) {
+        errors.push({ handle, error: `Duplicate SKU(s): ${duplicateSkus.join(", ")}` });
+        invalidHandles.add(handle);
+      }
+
+      // Create products and variants (only for valid products)
+      for (const handle of Object.keys(productGroups)) {
+        if (invalidHandles.has(handle)) continue;
+        
+        try {
+          const productData = productGroups[handle];
+          
+          // Skip products with no variants
+          if (productData.variants.length === 0) {
+            errors.push({ handle, error: "No variants with SKU found" });
+            continue;
+          }
+
+          // Create product
+          const product = await storage.createProduct({
+            name: productData.name,
+            description: productData.description,
+            category: productData.category,
+          });
+
+          // Create variants
+          for (const variantData of productData.variants) {
+            await storage.createProductVariant({
+              productId: product.id,
+              sku: variantData.sku,
+              color: variantData.color,
+              size: variantData.size,
+              costPrice: variantData.costPrice.toString(),
+              sellingPrice: variantData.sellingPrice.toString(),
+              stockQuantity: variantData.stockQuantity,
+            });
+          }
+
+          successCount++;
+        } catch (error: any) {
+          errors.push({ handle, error: error.message });
+        }
+      }
+
+      await storage.updateBulkUploadJob(job.id, {
+        status: "completed",
+        processedRows: Object.keys(productGroups).length,
+        successRows: successCount,
+        errorRows: errors.length,
+        errors: errors.length > 0 ? errors : null,
+        completedAt: new Date(),
+      });
+
+      await storage.createAuditLog({
+        userId: req.user!.id,
+        action: "import",
+        module: "products",
+        entityId: job.id,
+        entityType: "bulk_import",
+        newData: { totalProducts: successCount, totalRows: rows.length },
+      });
+
+      res.json({
+        success: true,
+        jobId: job.id,
+        totalProducts: Object.keys(productGroups).length,
+        imported: successCount,
+        errors: errors.length,
+        errorDetails: errors,
+      });
+    } catch (error) {
+      console.error("Products import error:", error);
+      res.status(500).json({ error: "Failed to import products" });
+    }
+  });
+
   app.get("/api/couriers", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_COURIERS), async (req, res) => {
     const couriers = await storage.getCourierPartners();
     res.json(couriers);

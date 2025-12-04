@@ -23,15 +23,17 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Package, Eye, Loader2, Trash2 } from "lucide-react";
+import { Plus, Package, Eye, Loader2, Trash2, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { ProductImportModal } from "@/components/ProductImportModal";
 import type { ProductWithVariants, ProductVariant } from "@shared/schema";
 
 export default function Products() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<ProductWithVariants | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -214,10 +216,16 @@ export default function Products() {
           <h1 className="text-2xl font-bold" data-testid="text-page-title">Products</h1>
           <p className="text-muted-foreground">Manage your product catalog</p>
         </div>
-        <Button onClick={() => setCreateDialogOpen(true)} data-testid="button-add-product">
-          <Plus className="h-4 w-4 mr-2" />
-          Add Product
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setImportModalOpen(true)} data-testid="button-import-products">
+            <Upload className="h-4 w-4 mr-2" />
+            Import CSV
+          </Button>
+          <Button onClick={() => setCreateDialogOpen(true)} data-testid="button-add-product">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Product
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-4">
@@ -449,6 +457,8 @@ export default function Products() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ProductImportModal open={importModalOpen} onOpenChange={setImportModalOpen} />
     </div>
   );
 }

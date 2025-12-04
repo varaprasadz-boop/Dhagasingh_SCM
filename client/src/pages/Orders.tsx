@@ -3,7 +3,6 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { DataTable } from "@/components/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SearchInput } from "@/components/SearchInput";
-import { FileUpload } from "@/components/FileUpload";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +20,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
@@ -35,9 +33,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { FileUp, Truck, Download, Eye, MapPin, Phone, Mail, Package, Clock, ArrowUpDown, Loader2 } from "lucide-react";
+import { Truck, Download, Eye, MapPin, Phone, Mail, Package, Clock, ArrowUpDown, Loader2, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { OrderImportModal } from "@/components/OrderImportModal";
 import type { OrderWithItems, CourierPartner, User } from "@shared/schema";
 
 type OrderStatus = "pending" | "dispatched" | "delivered" | "rto" | "returned" | "refunded";
@@ -113,22 +112,6 @@ export default function Orders() {
     },
     onError: (error: Error) => {
       toast({ title: "Failed to update status", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const importMutation = useMutation({
-    mutationFn: (data: { csvData: string; fileName: string }) =>
-      apiRequest("POST", "/api/orders/import", data),
-    onSuccess: (response: any) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      toast({ 
-        title: "Import completed", 
-        description: `Imported ${response.imported} orders. ${response.errors > 0 ? `${response.errors} errors.` : ''}` 
-      });
-      setImportDialogOpen(false);
-    },
-    onError: (error: Error) => {
-      toast({ title: "Import failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -293,11 +276,6 @@ export default function Orders() {
     }
   };
 
-  const handleImportCSV = async (file: File) => {
-    const text = await file.text();
-    importMutation.mutate({ csvData: text, fileName: file.name });
-  };
-
   const statusCounts = {
     all: orders.length,
     pending: orders.filter((o) => o.status === "pending").length,
@@ -335,58 +313,10 @@ export default function Orders() {
           <p className="text-muted-foreground">Manage and track all your orders</p>
         </div>
         <div className="flex gap-2">
-          <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" data-testid="button-import-orders">
-                <FileUp className="h-4 w-4 mr-2" />
-                Import Orders
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-lg" data-testid="modal-import">
-              <DialogHeader>
-                <DialogTitle>Import Orders from Shopify</DialogTitle>
-                <DialogDescription>Upload CSV files to import orders or update dispatch status</DialogDescription>
-              </DialogHeader>
-              <Tabs defaultValue="orders" className="mt-4">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="orders">Import Orders</TabsTrigger>
-                  <TabsTrigger value="dispatch">Bulk Dispatch</TabsTrigger>
-                </TabsList>
-                <TabsContent value="orders" className="space-y-4 mt-4">
-                  <p className="text-sm text-muted-foreground">
-                    Upload a Shopify-format CSV file to import orders. All orders will start with "Pending" status.
-                  </p>
-                  <FileUpload
-                    accept=".csv"
-                    label="Upload Orders CSV"
-                    description="Shopify export format"
-                    onUpload={handleImportCSV}
-                    disabled={importMutation.isPending}
-                  />
-                  {importMutation.isPending && (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Importing orders...
-                    </div>
-                  )}
-                </TabsContent>
-                <TabsContent value="dispatch" className="space-y-4 mt-4">
-                  <p className="text-sm text-muted-foreground">
-                    Upload a CSV with Order Number, Courier Name, and AWB Number to bulk update dispatch status.
-                  </p>
-                  <FileUpload
-                    accept=".csv"
-                    label="Upload Dispatch CSV"
-                    description="Order #, Courier, AWB, Delivery Cost"
-                    onUpload={(file) => {
-                      console.log("Bulk dispatch from:", file.name);
-                      setImportDialogOpen(false);
-                    }}
-                  />
-                </TabsContent>
-              </Tabs>
-            </DialogContent>
-          </Dialog>
+          <Button variant="outline" onClick={() => setImportDialogOpen(true)} data-testid="button-import-orders">
+            <Upload className="h-4 w-4 mr-2" />
+            Import CSV
+          </Button>
           <Button variant="outline" data-testid="button-export-orders">
             <Download className="h-4 w-4 mr-2" />
             Export
@@ -748,6 +678,8 @@ export default function Orders() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <OrderImportModal open={importDialogOpen} onOpenChange={setImportDialogOpen} />
     </div>
   );
 }
