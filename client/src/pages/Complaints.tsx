@@ -1,11 +1,13 @@
 import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { DataTable } from "@/components/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SearchInput } from "@/components/SearchInput";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
@@ -31,10 +33,17 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Filter, Eye, Clock, User, MessageSquare, CheckCircle, XCircle, AlertCircle } from "lucide-react";
-import { mockComplaints, mockOrders, type Complaint, type ComplaintTimelineEntry } from "@/lib/mockData";
+import { Plus, Filter, Eye, User, MessageSquare, CheckCircle, XCircle, AlertCircle, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import type { Complaint, ComplaintTimeline, OrderWithItems } from "@shared/schema";
 
 type ComplaintStatus = "open" | "in_progress" | "resolved" | "rejected" | "all";
+
+type ComplaintWithTimeline = Complaint & {
+  timeline: ComplaintTimeline[];
+  order?: OrderWithItems | null;
+};
 
 const reasonLabels: Record<string, string> = {
   wrong_item: "Wrong Item",
@@ -46,13 +55,13 @@ const reasonLabels: Record<string, string> = {
 };
 
 export default function Complaints() {
-  const [complaints, setComplaints] = useState(mockComplaints);
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ComplaintStatus>("all");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [refundDialogOpen, setRefundDialogOpen] = useState(false);
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
-  const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
+  const [selectedComplaint, setSelectedComplaint] = useState<ComplaintWithTimeline | null>(null);
   const [refundAmount, setRefundAmount] = useState("");
   const [newComment, setNewComment] = useState("");
 
@@ -62,43 +71,103 @@ export default function Complaints() {
     description: "",
   });
 
+  const { data: complaints = [], isLoading: complaintsLoading } = useQuery<ComplaintWithTimeline[]>({
+    queryKey: ["/api/complaints"],
+  });
+
+  const { data: orders = [] } = useQuery<OrderWithItems[]>({
+    queryKey: ["/api/orders"],
+  });
+
+  const createComplaintMutation = useMutation({
+    mutationFn: (data: { orderId: string; reason: string; description: string }) =>
+      apiRequest("POST", "/api/complaints", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/complaints"] });
+      toast({ title: "Ticket created successfully" });
+      setCreateDialogOpen(false);
+      setNewTicket({ orderId: "", reason: "", description: "" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to create ticket", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const addTimelineMutation = useMutation({
+    mutationFn: (data: { complaintId: string; action: string; comment: string }) =>
+      apiRequest("POST", `/api/complaints/${data.complaintId}/timeline`, { action: data.action, comment: data.comment }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/complaints"] });
+      toast({ title: "Comment added" });
+      setNewComment("");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to add comment", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const resolveMutation = useMutation({
+    mutationFn: (data: { complaintId: string; resolutionType: string; resolutionNotes?: string; status: string; refundAmount?: number }) =>
+      apiRequest("POST", `/api/complaints/${data.complaintId}/resolve`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/complaints"] });
+      toast({ title: "Complaint resolved" });
+      setRefundDialogOpen(false);
+      setRefundAmount("");
+      setDetailSheetOpen(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to resolve complaint", description: error.message, variant: "destructive" });
+    },
+  });
+
   const filteredComplaints = complaints.filter((c) => {
     const matchesSearch =
       c.ticketNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.customerName.toLowerCase().includes(searchQuery.toLowerCase());
+      (c.order?.orderNumber || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (c.order?.customerName || "").toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === "all" || c.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
   const columns = [
     { key: "ticketNumber", header: "Ticket #", sortable: true },
-    { key: "orderNumber", header: "Order #", sortable: true },
-    { key: "customerName", header: "Customer", sortable: true },
+    { 
+      key: "orderNumber", 
+      header: "Order #", 
+      sortable: true,
+      render: (c: ComplaintWithTimeline) => c.order?.orderNumber || "-",
+    },
+    { 
+      key: "customerName", 
+      header: "Customer", 
+      sortable: true,
+      render: (c: ComplaintWithTimeline) => c.order?.customerName || "-",
+    },
     {
       key: "reason",
       header: "Reason",
-      render: (c: Complaint) => reasonLabels[c.reason] || c.reason,
+      render: (c: ComplaintWithTimeline) => reasonLabels[c.reason] || c.reason,
     },
     {
       key: "status",
       header: "Status",
-      render: (c: Complaint) => <StatusBadge status={c.status} />,
+      render: (c: ComplaintWithTimeline) => <StatusBadge status={c.status} />,
     },
     {
       key: "createdAt",
       header: "Created",
-      render: (c: Complaint) =>
-        new Date(c.createdAt).toLocaleDateString("en-IN", {
+      render: (c: ComplaintWithTimeline) =>
+        c.createdAt ? new Date(c.createdAt).toLocaleDateString("en-IN", {
           day: "numeric",
           month: "short",
           year: "numeric",
-        }),
+        }) : "-",
     },
     {
       key: "actions",
       header: "",
-      render: (c: Complaint) => (
+      render: (c: ComplaintWithTimeline) => (
         <Button
           variant="ghost"
           size="sm"
@@ -124,133 +193,44 @@ export default function Complaints() {
       return;
     }
 
-    const newEntry: ComplaintTimelineEntry = {
-      id: `${selectedComplaint.id}-${selectedComplaint.timeline.length + 1}`,
-      action: resolution === "rejected" ? "Rejected" : "Resolved",
-      comment: resolution === "rejected" ? "Complaint rejected" : "Replacement approved",
-      employeeName: "Current User",
-      employeeRole: "Admin",
-      createdAt: new Date().toISOString(),
-    };
-
-    setComplaints((prev) =>
-      prev.map((c) =>
-        c.id === selectedComplaint.id
-          ? {
-              ...c,
-              status: resolution === "rejected" ? "rejected" : "resolved",
-              resolution,
-              timeline: [...c.timeline, newEntry],
-            }
-          : c
-      )
-    );
-
-    setSelectedComplaint((prev) =>
-      prev ? { ...prev, status: resolution === "rejected" ? "rejected" : "resolved", resolution, timeline: [...prev.timeline, newEntry] } : null
-    );
+    resolveMutation.mutate({
+      complaintId: selectedComplaint.id,
+      resolutionType: resolution,
+      status: resolution === "rejected" ? "rejected" : "resolved",
+      resolutionNotes: resolution === "rejected" ? "Complaint rejected" : "Replacement approved",
+    });
   };
 
   const handleRefundSubmit = () => {
-    if (!selectedComplaint) return;
+    if (!selectedComplaint || !refundAmount) return;
 
-    const newEntry: ComplaintTimelineEntry = {
-      id: `${selectedComplaint.id}-${selectedComplaint.timeline.length + 1}`,
-      action: "Resolved",
-      comment: `Refund of ₹${refundAmount} processed`,
-      employeeName: "Current User",
-      employeeRole: "Admin",
-      createdAt: new Date().toISOString(),
-    };
-
-    setComplaints((prev) =>
-      prev.map((c) =>
-        c.id === selectedComplaint.id
-          ? {
-              ...c,
-              status: "resolved",
-              resolution: "refund",
-              refundAmount: parseFloat(refundAmount) || 0,
-              timeline: [...c.timeline, newEntry],
-            }
-          : c
-      )
-    );
-
-    setSelectedComplaint((prev) =>
-      prev
-        ? {
-            ...prev,
-            status: "resolved",
-            resolution: "refund",
-            refundAmount: parseFloat(refundAmount) || 0,
-            timeline: [...prev.timeline, newEntry],
-          }
-        : null
-    );
-
-    setRefundDialogOpen(false);
-    setRefundAmount("");
+    resolveMutation.mutate({
+      complaintId: selectedComplaint.id,
+      resolutionType: "refund",
+      status: "resolved",
+      resolutionNotes: `Refund of ₹${refundAmount} processed`,
+      refundAmount: parseFloat(refundAmount),
+    });
   };
 
   const handleAddComment = () => {
     if (!selectedComplaint || !newComment.trim()) return;
 
-    const newEntry: ComplaintTimelineEntry = {
-      id: `${selectedComplaint.id}-${selectedComplaint.timeline.length + 1}`,
+    addTimelineMutation.mutate({
+      complaintId: selectedComplaint.id,
       action: "Comment Added",
       comment: newComment,
-      employeeName: "Current User",
-      employeeRole: "Customer Support",
-      createdAt: new Date().toISOString(),
-    };
-
-    const updatedTimeline = [...selectedComplaint.timeline, newEntry];
-
-    setComplaints((prev) =>
-      prev.map((c) =>
-        c.id === selectedComplaint.id
-          ? { ...c, timeline: updatedTimeline, status: c.status === "open" ? "in_progress" : c.status }
-          : c
-      )
-    );
-
-    setSelectedComplaint((prev) =>
-      prev ? { ...prev, timeline: updatedTimeline, status: prev.status === "open" ? "in_progress" : prev.status } : null
-    );
-
-    setNewComment("");
+    });
   };
 
   const handleCreateTicket = () => {
-    const order = mockOrders.find((o) => o.id === newTicket.orderId);
-    if (!order) return;
+    if (!newTicket.orderId || !newTicket.reason) return;
 
-    const newComplaint: Complaint = {
-      id: String(complaints.length + 1),
-      ticketNumber: `TKT-${String(complaints.length + 1).padStart(3, "0")}`,
-      orderId: order.id,
-      orderNumber: order.orderNumber,
-      customerName: order.customerName,
-      reason: newTicket.reason as Complaint["reason"],
+    createComplaintMutation.mutate({
+      orderId: newTicket.orderId,
+      reason: newTicket.reason,
       description: newTicket.description,
-      status: "open",
-      timeline: [
-        {
-          id: "1",
-          action: "Ticket Created",
-          comment: newTicket.description,
-          employeeName: "Current User",
-          employeeRole: "Customer Support",
-          createdAt: new Date().toISOString(),
-        },
-      ],
-      createdAt: new Date().toISOString(),
-    };
-
-    setComplaints((prev) => [newComplaint, ...prev]);
-    setCreateDialogOpen(false);
-    setNewTicket({ orderId: "", reason: "", description: "" });
+    });
   };
 
   const getTimelineIcon = (action: string) => {
@@ -267,6 +247,23 @@ export default function Complaints() {
     resolved: complaints.filter((c) => c.status === "resolved").length,
     rejected: complaints.filter((c) => c.status === "rejected").length,
   };
+
+  if (complaintsLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Complaints</h1>
+            <p className="text-muted-foreground">Manage customer complaints and refunds</p>
+          </div>
+        </div>
+        <div className="space-y-4">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-[400px] w-full" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -349,7 +346,7 @@ export default function Complaints() {
               setSelectedComplaint(c);
               setDetailSheetOpen(true);
             }}
-            emptyMessage="No complaints found"
+            emptyMessage="No complaints found. Create a ticket for customer issues."
           />
         </CardContent>
       </Card>
@@ -371,11 +368,11 @@ export default function Complaints() {
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Order</span>
-                      <span className="font-mono">{selectedComplaint.orderNumber}</span>
+                      <span className="font-mono">{selectedComplaint.order?.orderNumber || "-"}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Customer</span>
-                      <span>{selectedComplaint.customerName}</span>
+                      <span>{selectedComplaint.order?.customerName || "-"}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Reason</span>
@@ -383,27 +380,29 @@ export default function Complaints() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Created</span>
-                      <span>{new Date(selectedComplaint.createdAt).toLocaleString("en-IN")}</span>
+                      <span>{selectedComplaint.createdAt ? new Date(selectedComplaint.createdAt).toLocaleString("en-IN") : "-"}</span>
                     </div>
                   </div>
-                  <div className="mt-3 p-3 bg-muted rounded-md">
-                    <p className="text-sm">{selectedComplaint.description}</p>
-                  </div>
+                  {selectedComplaint.description && (
+                    <div className="mt-3 p-3 bg-muted rounded-md">
+                      <p className="text-sm">{selectedComplaint.description}</p>
+                    </div>
+                  )}
                 </div>
 
-                {selectedComplaint.resolution && (
+                {selectedComplaint.resolutionType && (
                   <>
                     <Separator />
                     <div>
                       <h3 className="text-sm font-semibold text-muted-foreground mb-2">RESOLUTION</h3>
                       <div className="flex items-center gap-2">
-                        <Badge variant={selectedComplaint.resolution === "rejected" ? "destructive" : "default"}>
-                          {selectedComplaint.resolution.toUpperCase()}
+                        <Badge variant={selectedComplaint.resolutionType === "rejected" ? "destructive" : "default"}>
+                          {selectedComplaint.resolutionType.toUpperCase()}
                         </Badge>
-                        {selectedComplaint.refundAmount && (
-                          <span className="text-sm">₹{selectedComplaint.refundAmount}</span>
-                        )}
                       </div>
+                      {selectedComplaint.resolutionNotes && (
+                        <p className="text-sm text-muted-foreground mt-2">{selectedComplaint.resolutionNotes}</p>
+                      )}
                     </div>
                   </>
                 )}
@@ -414,11 +413,11 @@ export default function Complaints() {
                   <h3 className="text-sm font-semibold text-muted-foreground mb-3">TIMELINE</h3>
                   <ScrollArea className="h-64">
                     <div className="space-y-4">
-                      {selectedComplaint.timeline.map((entry, idx) => (
+                      {selectedComplaint.timeline?.map((entry, idx) => (
                         <div key={entry.id} className="flex gap-3">
                           <div className="flex flex-col items-center">
                             {getTimelineIcon(entry.action)}
-                            {idx < selectedComplaint.timeline.length - 1 && (
+                            {idx < (selectedComplaint.timeline?.length || 0) - 1 && (
                               <div className="w-px h-full bg-border mt-1" />
                             )}
                           </div>
@@ -426,7 +425,7 @@ export default function Complaints() {
                             <div className="flex items-center gap-2">
                               <span className="font-medium text-sm">{entry.action}</span>
                               <span className="text-xs text-muted-foreground">
-                                {new Date(entry.createdAt).toLocaleString("en-IN")}
+                                {entry.createdAt ? new Date(entry.createdAt).toLocaleString("en-IN") : ""}
                               </span>
                             </div>
                             <p className="text-sm text-muted-foreground mt-1">{entry.comment}</p>
@@ -437,6 +436,9 @@ export default function Complaints() {
                           </div>
                         </div>
                       ))}
+                      {(!selectedComplaint.timeline || selectedComplaint.timeline.length === 0) && (
+                        <p className="text-sm text-muted-foreground text-center py-4">No timeline entries yet</p>
+                      )}
                     </div>
                   </ScrollArea>
                 </div>
@@ -453,8 +455,12 @@ export default function Complaints() {
                           placeholder="Add a comment..."
                           data-testid="input-complaint-comment"
                         />
-                        <Button onClick={handleAddComment} disabled={!newComment.trim()} data-testid="button-add-comment">
-                          Add
+                        <Button 
+                          onClick={handleAddComment} 
+                          disabled={!newComment.trim() || addTimelineMutation.isPending} 
+                          data-testid="button-add-comment"
+                        >
+                          {addTimelineMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add"}
                         </Button>
                       </div>
                     </div>
@@ -464,6 +470,7 @@ export default function Complaints() {
                         <Button
                           variant="default"
                           onClick={() => handleResolve("refund")}
+                          disabled={resolveMutation.isPending}
                           data-testid="button-resolve-refund"
                         >
                           Refund
@@ -471,6 +478,7 @@ export default function Complaints() {
                         <Button
                           variant="secondary"
                           onClick={() => handleResolve("replacement")}
+                          disabled={resolveMutation.isPending}
                           data-testid="button-resolve-replacement"
                         >
                           Replace
@@ -478,6 +486,7 @@ export default function Complaints() {
                         <Button
                           variant="destructive"
                           onClick={() => handleResolve("rejected")}
+                          disabled={resolveMutation.isPending}
                           data-testid="button-resolve-reject"
                         >
                           Reject
@@ -509,7 +518,7 @@ export default function Complaints() {
                   <SelectValue placeholder="Select order" />
                 </SelectTrigger>
                 <SelectContent>
-                  {mockOrders.map((order) => (
+                  {orders.map((order) => (
                     <SelectItem key={order.id} value={order.id}>
                       {order.orderNumber} - {order.customerName}
                     </SelectItem>
@@ -552,9 +561,12 @@ export default function Complaints() {
             </Button>
             <Button
               onClick={handleCreateTicket}
-              disabled={!newTicket.orderId || !newTicket.reason}
+              disabled={!newTicket.orderId || !newTicket.reason || createComplaintMutation.isPending}
               data-testid="button-submit-ticket"
             >
+              {createComplaintMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : null}
               Create Ticket
             </Button>
           </DialogFooter>
@@ -585,9 +597,12 @@ export default function Complaints() {
             </Button>
             <Button
               onClick={handleRefundSubmit}
-              disabled={!refundAmount}
+              disabled={!refundAmount || resolveMutation.isPending}
               data-testid="button-submit-refund"
             >
+              {resolveMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : null}
               Process Refund
             </Button>
           </DialogFooter>

@@ -9,6 +9,7 @@ interface FileUploadProps {
   onUpload?: (file: File) => void;
   label?: string;
   description?: string;
+  disabled?: boolean;
 }
 
 export function FileUpload({
@@ -17,6 +18,7 @@ export function FileUpload({
   onUpload,
   label = "Upload CSV File",
   description = "Drag and drop or click to upload. Max 5MB.",
+  disabled = false,
 }: FileUploadProps) {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -69,14 +71,15 @@ export function FileUpload({
       <Card
         className={`border-2 border-dashed p-6 transition-colors ${
           isDragging ? "border-primary bg-primary/5" : "border-muted"
-        } ${error ? "border-destructive" : ""}`}
+        } ${error ? "border-destructive" : ""} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
         onDragOver={(e) => {
+          if (disabled) return;
           e.preventDefault();
           setIsDragging(true);
         }}
         onDragLeave={() => setIsDragging(false)}
-        onDrop={handleDrop}
-        onClick={() => inputRef.current?.click()}
+        onDrop={(e) => !disabled && handleDrop(e)}
+        onClick={() => !disabled && inputRef.current?.click()}
         data-testid="dropzone-file-upload"
       >
         <input

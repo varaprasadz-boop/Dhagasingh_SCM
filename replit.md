@@ -8,6 +8,16 @@ DS_SCM is a comprehensive supply chain management system designed for eCommerce 
 
 Preferred communication style: Simple, everyday language.
 
+## Recent Changes
+
+**December 2024 - Real API Integration Complete**
+- All desktop pages (Dashboard, Orders, Inventory, Reports, Complaints, Couriers, Internal Delivery, Products, Suppliers, User Management, Roles Management) now use real API data
+- All mobile pages (MobileDashboard, MobileOrders, MobileStock) now use real API data
+- Reports page rebuilt to use dashboard stats API for dynamic analytics
+- OrderCard component updated to use schema types instead of mock data types
+- DispatchModal updated to fetch couriers from API
+- Mock data (mockData.ts) is deprecated - all components should use API endpoints
+
 ## System Architecture
 
 ### Frontend Architecture
@@ -48,7 +58,24 @@ Preferred communication style: Simple, everyday language.
 - PostgreSQL as the primary database (configured via @neondatabase/serverless)
 - Schema-first approach with Drizzle-Zod integration for runtime validation
 - Memory storage implementation (MemStorage) for development/testing with interface-based design for easy database swapping
-- **Important**: Neon HTTP driver has a known issue with boolean type mapping where PostgreSQL 't'/'f' values are incorrectly converted to JavaScript `false`. Use raw SQL with `::text` cast and `getBooleanValue()` helper function in `server/db.ts` to get correct boolean values.
+
+**Neon HTTP Driver Workarounds**
+The Neon HTTP driver has several known issues that require specific patterns:
+
+1. **Boolean Type Mapping**: PostgreSQL 't'/'f' values are incorrectly converted to JavaScript `false`. Solution: Use raw SQL with `::text` cast and `getBooleanValue()` helper function in `server/db.ts`.
+
+2. **INSERT...RETURNING Returns Undefined**: The `INSERT...RETURNING` pattern can return undefined instead of the inserted row. Solution: All create methods pre-generate IDs using `crypto.randomUUID()`, insert without RETURNING, then fetch the created record:
+   ```typescript
+   async createEntity(data: InsertData): Promise<Entity> {
+     const id = crypto.randomUUID();
+     await db.insert(entities).values({ ...data, id });
+     const created = await this.getEntityById(id);
+     if (!created) throw new Error("Failed to create entity");
+     return created;
+   }
+   ```
+
+3. **Empty Result Sets Return Null**: Drizzle queries may return null for empty result sets. Solution: Wrap query methods in try-catch and use optional chaining (`result?.[0]`) with null fallbacks (`return result || []`).
 
 **API Design**
 - RESTful API pattern with `/api` prefix for all application routes

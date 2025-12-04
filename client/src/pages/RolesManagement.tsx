@@ -67,10 +67,7 @@ export default function RolesManagement() {
 
   const createRoleMutation = useMutation({
     mutationFn: async (data: { name: string; description: string }) => {
-      return apiRequest("/api/roles", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
+      return apiRequest("POST", "/api/roles", data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/roles"] });
@@ -86,10 +83,7 @@ export default function RolesManagement() {
 
   const updatePermissionsMutation = useMutation({
     mutationFn: async ({ roleId, permissionIds }: { roleId: string; permissionIds: string[] }) => {
-      return apiRequest(`/api/roles/${roleId}/permissions`, {
-        method: "PUT",
-        body: JSON.stringify({ permissionIds }),
-      });
+      return apiRequest("PUT", `/api/roles/${roleId}/permissions`, { permissionIds });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/roles"] });
@@ -103,7 +97,7 @@ export default function RolesManagement() {
 
   const deleteRoleMutation = useMutation({
     mutationFn: async (roleId: string) => {
-      return apiRequest(`/api/roles/${roleId}`, { method: "DELETE" });
+      return apiRequest("DELETE", `/api/roles/${roleId}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/roles"] });
@@ -163,7 +157,10 @@ export default function RolesManagement() {
 
   const toggleModulePermissions = (modulePerms: Permission[], isChecked: boolean) => {
     if (isChecked) {
-      setSelectedPermissions(prev => [...new Set([...prev, ...modulePerms.map(p => p.id)])]);
+      setSelectedPermissions(prev => {
+        const combined = [...prev, ...modulePerms.map(p => p.id)];
+        return Array.from(new Set(combined));
+      });
     } else {
       const modulePermIds = modulePerms.map(p => p.id);
       setSelectedPermissions(prev => prev.filter(id => !modulePermIds.includes(id)));

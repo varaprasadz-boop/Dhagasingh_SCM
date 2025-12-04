@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { DataTable } from "@/components/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SearchInput } from "@/components/SearchInput";
@@ -16,36 +17,99 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Edit, Trash2 } from "lucide-react";
-import { mockSuppliers, type Supplier } from "@/lib/mockData";
+import { Plus, Edit, Trash2, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import type { Supplier } from "@shared/schema";
 
 export default function Suppliers() {
-  const [suppliers, setSuppliers] = useState(mockSuppliers);
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [supplierToDelete, setSupplierToDelete] = useState<Supplier | null>(null);
 
   const [formData, setFormData] = useState({
     name: "",
+    contactPerson: "",
     email: "",
     phone: "",
-    alternatePhone: "",
     address: "",
     gstNumber: "",
     status: "active" as "active" | "inactive",
   });
 
+  const { data: suppliers = [], isLoading } = useQuery<Supplier[]>({
+    queryKey: ["/api/suppliers"],
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data: typeof formData) =>
+      apiRequest("POST", "/api/suppliers", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
+      toast({ title: "Supplier created successfully" });
+      setDialogOpen(false);
+      resetForm();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to create supplier", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: typeof formData }) =>
+      apiRequest("PATCH", `/api/suppliers/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
+      toast({ title: "Supplier updated successfully" });
+      setDialogOpen(false);
+      setEditingSupplier(null);
+      resetForm();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to update supplier", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/suppliers/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
+      toast({ title: "Supplier deleted successfully" });
+      setDeleteConfirmOpen(false);
+      setSupplierToDelete(null);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to delete supplier", description: error.message, variant: "destructive" });
+    },
+  });
+
   const filteredSuppliers = suppliers.filter(
     (s) =>
       s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (s.email && s.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (s.gstNumber && s.gstNumber.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const columns = [
     { key: "name", header: "Name", sortable: true },
-    { key: "email", header: "Email" },
-    { key: "phone", header: "Phone" },
+    { 
+      key: "contactPerson", 
+      header: "Contact Person",
+      render: (s: Supplier) => s.contactPerson || "-",
+    },
+    { 
+      key: "email", 
+      header: "Email",
+      render: (s: Supplier) => s.email || "-",
+    },
+    { 
+      key: "phone", 
+      header: "Phone",
+      render: (s: Supplier) => s.phone || "-",
+    },
     {
       key: "gstNumber",
       header: "GST Number",
@@ -88,7 +152,8 @@ export default function Suppliers() {
             size="icon"
             onClick={(e) => {
               e.stopPropagation();
-              handleDelete(s.id);
+              setSupplierToDelete(s);
+              setDeleteConfirmOpen(true);
             }}
             data-testid={`button-delete-supplier-${s.id}`}
           >
@@ -103,9 +168,9 @@ export default function Suppliers() {
     setEditingSupplier(supplier);
     setFormData({
       name: supplier.name,
-      email: supplier.email,
-      phone: supplier.phone,
-      alternatePhone: supplier.alternatePhone || "",
+      contactPerson: supplier.contactPerson || "",
+      email: supplier.email || "",
+      phone: supplier.phone || "",
       address: supplier.address || "",
       gstNumber: supplier.gstNumber || "",
       status: supplier.status,
@@ -113,36 +178,20 @@ export default function Suppliers() {
     setDialogOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    setSuppliers((prev) => prev.filter((s) => s.id !== id));
-  };
-
   const handleSubmit = () => {
     if (editingSupplier) {
-      setSuppliers((prev) =>
-        prev.map((s) =>
-          s.id === editingSupplier.id ? { ...s, ...formData } : s
-        )
-      );
+      updateMutation.mutate({ id: editingSupplier.id, data: formData });
     } else {
-      const newSupplier: Supplier = {
-        id: String(suppliers.length + 1),
-        ...formData,
-      };
-      setSuppliers((prev) => [...prev, newSupplier]);
+      createMutation.mutate(formData);
     }
-
-    setDialogOpen(false);
-    setEditingSupplier(null);
-    resetForm();
   };
 
   const resetForm = () => {
     setFormData({
       name: "",
+      contactPerson: "",
       email: "",
       phone: "",
-      alternatePhone: "",
       address: "",
       gstNumber: "",
       status: "active",
@@ -155,17 +204,44 @@ export default function Suppliers() {
     setDialogOpen(true);
   };
 
+  const isPending = createMutation.isPending || updateMutation.isPending;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Suppliers</h1>
+          <h1 className="text-2xl font-bold" data-testid="text-page-title">Suppliers</h1>
           <p className="text-muted-foreground">Manage your vendor relationships</p>
         </div>
         <Button onClick={handleOpenCreate} data-testid="button-add-supplier">
           <Plus className="h-4 w-4 mr-2" />
           Add Supplier
         </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Total Suppliers</p>
+            <p className="text-2xl font-bold" data-testid="text-total-suppliers">{suppliers.length}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Active Suppliers</p>
+            <p className="text-2xl font-bold" data-testid="text-active-suppliers">
+              {suppliers.filter((s) => s.status === "active").length}
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       <SearchInput
@@ -210,9 +286,21 @@ export default function Suppliers() {
               />
             </div>
 
+            <div className="space-y-2">
+              <Label>Contact Person</Label>
+              <Input
+                value={formData.contactPerson}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, contactPerson: e.target.value }))
+                }
+                placeholder="John Doe"
+                data-testid="input-supplier-contact"
+              />
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Email *</Label>
+                <Label>Email</Label>
                 <Input
                   type="email"
                   value={formData.email}
@@ -224,7 +312,7 @@ export default function Suppliers() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Phone *</Label>
+                <Label>Phone</Label>
                 <Input
                   value={formData.phone}
                   onChange={(e) =>
@@ -236,33 +324,20 @@ export default function Suppliers() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Alternate Phone (Optional)</Label>
-                <Input
-                  value={formData.alternatePhone}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, alternatePhone: e.target.value }))
-                  }
-                  placeholder="+91 98765 43211"
-                  data-testid="input-supplier-alt-phone"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>GST Number (Optional)</Label>
-                <Input
-                  value={formData.gstNumber}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, gstNumber: e.target.value.toUpperCase() }))
-                  }
-                  placeholder="27AABCT1234F1ZP"
-                  data-testid="input-supplier-gst"
-                />
-              </div>
+            <div className="space-y-2">
+              <Label>GST Number</Label>
+              <Input
+                value={formData.gstNumber}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, gstNumber: e.target.value.toUpperCase() }))
+                }
+                placeholder="27AABCT1234F1ZP"
+                data-testid="input-supplier-gst"
+              />
             </div>
 
             <div className="space-y-2">
-              <Label>Address (Optional)</Label>
+              <Label>Address</Label>
               <Textarea
                 value={formData.address}
                 onChange={(e) =>
@@ -293,10 +368,36 @@ export default function Suppliers() {
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={!formData.name || !formData.email || !formData.phone}
+              disabled={!formData.name || isPending}
               data-testid="button-submit-supplier"
             >
+              {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {editingSupplier ? "Update" : "Add"} Supplier
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Supplier</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete "{supplierToDelete?.name}"? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => supplierToDelete && deleteMutation.mutate(supplierToDelete.id)}
+              disabled={deleteMutation.isPending}
+              data-testid="button-confirm-delete"
+            >
+              {deleteMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>

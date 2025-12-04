@@ -13,6 +13,7 @@ import {
   type UserWithRole, type PermissionCode
 } from "@shared/schema";
 import Papa from "papaparse";
+import { delhiveryService, createDelhiveryShipmentFromOrder } from "./services/delhivery";
 
 declare global {
   namespace Express {
@@ -384,6 +385,7 @@ export async function registerRoutes(
       
       res.status(201).json(supplier);
     } catch (error) {
+      console.log("Error creating supplier:", error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors });
       }
@@ -1270,6 +1272,205 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Dashboard stats error:", error);
       res.status(500).json({ error: "Failed to get dashboard stats" });
+    }
+  });
+
+  app.get("/api/courier/delhivery/status", authMiddleware, async (req, res) => {
+    res.json({
+      configured: delhiveryService.isConfigured(),
+      mode: process.env.DELHIVERY_MODE || "staging",
+    });
+  });
+
+  app.get("/api/courier/delhivery/pincode/:pincode", authMiddleware, async (req, res) => {
+    try {
+      const result = await delhiveryService.checkPincodeServiceability(req.params.pincode);
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to check pincode serviceability" });
+    }
+  });
+
+  app.post("/api/courier/delhivery/waybill", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_ORDERS), async (req, res) => {
+    try {
+      const { count } = req.body;
+      const result = await delhiveryService.generateWaybills(count || 1);
+      
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+      
+      res.json({ waybills: result.waybills });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to generate waybills" });
+    }
+  });
+
+  app.post("/api/courier/delhivery/ship/:orderId", authMiddleware, requirePermission(PERMISSION_CODES.DISPATCH_ORDERS), async (req, res) => {
+    try {
+      const order = await storage.getOrderById(req.params.orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      if (order.status !== "pending") {
+        return res.status(400).json({ error: "Order has already been dispatched" });
+      }
+
+      const setting = await storage.getSetting("warehouse_address");
+      const warehouseAddress = setting?.value ? JSON.parse(setting.value) : null;
+
+      if (!warehouseAddress) {
+        return res.status(400).json({ error: "Warehouse address not configured. Please configure in Settings." });
+      }
+
+      const shipmentRequest = createDelhiveryShipmentFromOrder(
+        {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          customerName: order.customerName,
+          customerPhone: order.customerPhone,
+          customerEmail: order.customerEmail,
+          shippingAddress: order.shippingAddress,
+          shippingCity: order.shippingCity,
+          shippingState: order.shippingState,
+          shippingPincode: order.shippingPincode,
+          paymentMethod: order.paymentMethod,
+          totalAmount: order.totalAmount,
+          items: order.items?.map(i => ({
+            productName: i.productName,
+            quantity: i.quantity,
+          })),
+        },
+        {
+          name: warehouseAddress.name || "Warehouse",
+          add: warehouseAddress.address,
+          city: warehouseAddress.city,
+          pin_code: warehouseAddress.pincode,
+          country: "India",
+          phone: warehouseAddress.phone,
+          state: warehouseAddress.state,
+        },
+        req.body.waybill
+      );
+
+      const result = await delhiveryService.createShipment(shipmentRequest);
+
+      if (!result.success) {
+        return res.status(400).json({ 
+          error: result.error,
+          details: result.response,
+        });
+      }
+
+      const delhiveryCourier = await storage.getCourierPartners();
+      const delhiveryPartner = delhiveryCourier.find(c => c.name.toLowerCase().includes("delhivery"));
+
+      await storage.updateOrder(order.id, {
+        status: "dispatched",
+        awbNumber: result.waybill,
+        courierPartnerId: delhiveryPartner?.id,
+        courierType: "third_party",
+        dispatchDate: new Date(),
+      });
+
+      await storage.updateOrderStatus(
+        order.id,
+        "dispatched",
+        `Shipped via Delhivery. AWB: ${result.waybill}`,
+        req.user!.id
+      );
+
+      const updatedOrder = await storage.getOrderById(order.id);
+      res.json({
+        success: true,
+        awbNumber: result.waybill,
+        order: updatedOrder,
+      });
+    } catch (error) {
+      console.error("Delhivery shipping error:", error);
+      res.status(500).json({ error: "Failed to create shipment" });
+    }
+  });
+
+  app.get("/api/courier/delhivery/track/:awb", authMiddleware, async (req, res) => {
+    try {
+      const result = await delhiveryService.trackShipment(req.params.awb);
+      
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+      
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to track shipment" });
+    }
+  });
+
+  app.post("/api/courier/delhivery/cancel/:awb", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_ORDERS), async (req, res) => {
+    try {
+      const result = await delhiveryService.cancelShipment(req.params.awb);
+      
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+      
+      res.json({ success: true, message: "Shipment cancelled successfully" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to cancel shipment" });
+    }
+  });
+
+  app.post("/api/orders/:id/track", authMiddleware, async (req, res) => {
+    try {
+      const order = await storage.getOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      if (!order.awbNumber) {
+        return res.status(400).json({ error: "Order has no AWB number" });
+      }
+
+      const result = await delhiveryService.trackShipment(order.awbNumber);
+      
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      if (result.status) {
+        const statusMap: Record<string, string> = {
+          "Delivered": "delivered",
+          "In Transit": "dispatched",
+          "Out for Delivery": "dispatched",
+          "Pending": "dispatched",
+          "RTO": "rto",
+          "Returned": "returned",
+        };
+
+        const newStatus = statusMap[result.status];
+        if (newStatus && newStatus !== order.status) {
+          await storage.updateOrder(order.id, { status: newStatus as any });
+          await storage.updateOrderStatus(
+            order.id,
+            newStatus as any,
+            `Auto-updated from Delhivery tracking: ${result.status}`,
+            req.user!.id
+          );
+        }
+      }
+      
+      res.json({
+        order: {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          awbNumber: order.awbNumber,
+        },
+        tracking: result,
+      });
+    } catch (error) {
+      console.error("Order tracking error:", error);
+      res.status(500).json({ error: "Failed to track order" });
     }
   });
 

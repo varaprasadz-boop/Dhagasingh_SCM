@@ -1,15 +1,28 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle } from "lucide-react";
-import type { ProductVariant } from "@/lib/mockData";
+
+interface StockVariant {
+  id: string;
+  sku: string;
+  productName?: string;
+  variantName?: string;
+  color?: string | null;
+  size?: string | null;
+  stockQuantity: number;
+  lowStockThreshold?: number | null;
+}
 
 interface StockAlertListProps {
-  variants: ProductVariant[];
+  variants: StockVariant[];
   threshold?: number;
 }
 
 export function StockAlertList({ variants, threshold = 25 }: StockAlertListProps) {
-  const lowStockItems = variants.filter((v) => v.stockQuantity <= threshold);
+  const lowStockItems = variants.filter((v) => {
+    const itemThreshold = v.lowStockThreshold || threshold;
+    return v.stockQuantity <= itemThreshold;
+  });
 
   if (lowStockItems.length === 0) {
     return (
@@ -50,7 +63,7 @@ export function StockAlertList({ variants, threshold = 25 }: StockAlertListProps
             <div>
               <p className="font-mono text-sm">{variant.sku}</p>
               <p className="text-xs text-muted-foreground">
-                {variant.color} / {variant.size}
+                {variant.productName || `${variant.color || ""} / ${variant.size || ""}`.trim() || "Default"}
               </p>
             </div>
             <Badge

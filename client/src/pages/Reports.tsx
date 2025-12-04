@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -8,19 +9,100 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Download, TrendingUp, TrendingDown, Package, Truck, AlertCircle } from "lucide-react";
-import { dashboardStats, mockOrders, mockProducts } from "@/lib/mockData";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Download, TrendingUp, Package, Truck, AlertCircle } from "lucide-react";
+import type { Order, Product, Complaint } from "@shared/schema";
+
+interface DashboardStats {
+  orders: {
+    total: number;
+    pending: number;
+    dispatched: number;
+    delivered: number;
+    rto: number;
+  };
+  products: {
+    total: number;
+    variants: number;
+    lowStock: number;
+  };
+  complaints: {
+    total: number;
+    open: number;
+    inProgress: number;
+    resolved: number;
+  };
+  deliveries: {
+    total: number;
+    pending: number;
+    completed: number;
+  };
+  revenue: {
+    total: number;
+    pending: number;
+  };
+}
+
+interface ProductWithVariants extends Product {
+  variants: Array<{
+    id: string;
+    sku: string;
+    stockQuantity: number;
+    costPrice: string;
+    sellingPrice: string;
+  }>;
+}
 
 export default function Reports() {
-  const totalOrderValue = mockOrders.reduce((sum, o) => sum + o.totalAmount, 0);
-  const avgOrderValue = totalOrderValue / mockOrders.length;
-  const codOrders = mockOrders.filter((o) => o.paymentMethod === "cod").length;
-  const prepaidOrders = mockOrders.filter((o) => o.paymentMethod === "prepaid").length;
+  const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
+    queryKey: ["/api/dashboard/stats"],
+  });
 
-  const totalInventoryValue = mockProducts.reduce(
-    (sum, p) => sum + p.variants.reduce((s, v) => s + v.stockQuantity * v.costPrice, 0),
+  const { data: orders = [] } = useQuery<Order[]>({
+    queryKey: ["/api/orders"],
+  });
+
+  const { data: products = [] } = useQuery<ProductWithVariants[]>({
+    queryKey: ["/api/products"],
+  });
+
+  const { data: complaints = [] } = useQuery<Complaint[]>({
+    queryKey: ["/api/complaints"],
+  });
+
+  const totalOrderValue = orders.reduce((sum, o) => sum + parseFloat(o.totalAmount || "0"), 0);
+  const avgOrderValue = orders.length > 0 ? totalOrderValue / orders.length : 0;
+  const codOrders = orders.filter((o) => o.paymentMethod === "cod").length;
+  const prepaidOrders = orders.filter((o) => o.paymentMethod === "prepaid").length;
+
+  const totalInventoryValue = products.reduce(
+    (sum, p) => sum + p.variants.reduce((s, v) => s + v.stockQuantity * parseFloat(v.costPrice || "0"), 0),
     0
   );
+
+  const deliveredCount = stats?.orders.delivered || 0;
+  const rtoCount = stats?.orders.rto || 0;
+  const totalDelivered = deliveredCount + rtoCount;
+  const deliveryRate = totalDelivered > 0 ? (deliveredCount / totalDelivered) * 100 : 100;
+  const rtoRate = totalDelivered > 0 ? (rtoCount / totalDelivered) * 100 : 0;
+
+  if (statsLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i}>
+              <CardContent className="pt-6">
+                <Skeleton className="h-4 w-24 mb-2" />
+                <Skeleton className="h-8 w-20" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -63,8 +145,8 @@ export default function Reports() {
                   <TrendingUp className="h-4 w-4 text-green-600" />
                   <span className="text-sm text-muted-foreground">Total Revenue</span>
                 </div>
-                <p className="text-2xl font-bold mt-2">₹{totalOrderValue.toLocaleString()}</p>
-                <p className="text-xs text-green-600">+12% from last period</p>
+                <p className="text-2xl font-bold mt-2" data-testid="stat-revenue">₹{totalOrderValue.toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground">All time</p>
               </CardContent>
             </Card>
             <Card>
@@ -73,7 +155,7 @@ export default function Reports() {
                   <Package className="h-4 w-4 text-blue-600" />
                   <span className="text-sm text-muted-foreground">Total Orders</span>
                 </div>
-                <p className="text-2xl font-bold mt-2">{mockOrders.length}</p>
+                <p className="text-2xl font-bold mt-2" data-testid="stat-orders">{orders.length}</p>
                 <p className="text-xs text-muted-foreground">Avg ₹{avgOrderValue.toFixed(0)}/order</p>
               </CardContent>
             </Card>
@@ -83,10 +165,12 @@ export default function Reports() {
                   <Truck className="h-4 w-4 text-orange-600" />
                   <span className="text-sm text-muted-foreground">Delivery Rate</span>
                 </div>
-                <p className="text-2xl font-bold mt-2">
-                  {((dashboardStats.deliveredOrders / (dashboardStats.deliveredOrders + dashboardStats.rtoOrders)) * 100).toFixed(1)}%
+                <p className="text-2xl font-bold mt-2" data-testid="stat-delivery-rate">
+                  {deliveryRate.toFixed(1)}%
                 </p>
-                <p className="text-xs text-green-600">Above target</p>
+                <p className={`text-xs ${deliveryRate >= 90 ? "text-green-600" : "text-orange-600"}`}>
+                  {deliveryRate >= 90 ? "Above target" : "Below target"}
+                </p>
               </CardContent>
             </Card>
             <Card>
@@ -95,10 +179,12 @@ export default function Reports() {
                   <AlertCircle className="h-4 w-4 text-red-600" />
                   <span className="text-sm text-muted-foreground">RTO Rate</span>
                 </div>
-                <p className="text-2xl font-bold mt-2">
-                  {((dashboardStats.rtoOrders / (dashboardStats.deliveredOrders + dashboardStats.rtoOrders)) * 100).toFixed(1)}%
+                <p className="text-2xl font-bold mt-2" data-testid="stat-rto-rate">
+                  {rtoRate.toFixed(1)}%
                 </p>
-                <p className="text-xs text-red-600">Needs attention</p>
+                <p className={`text-xs ${rtoRate <= 5 ? "text-green-600" : "text-red-600"}`}>
+                  {rtoRate <= 5 ? "On target" : "Needs attention"}
+                </p>
               </CardContent>
             </Card>
           </div>
@@ -111,13 +197,14 @@ export default function Reports() {
               <CardContent>
                 <div className="space-y-3">
                   {[
-                    { label: "Pending", value: dashboardStats.pendingOrders, color: "bg-yellow-500" },
-                    { label: "Dispatched", value: dashboardStats.dispatchedOrders, color: "bg-blue-500" },
-                    { label: "Delivered", value: dashboardStats.deliveredOrders, color: "bg-green-500" },
-                    { label: "RTO", value: dashboardStats.rtoOrders, color: "bg-red-500" },
+                    { label: "Pending", value: stats?.orders.pending || 0, color: "bg-yellow-500" },
+                    { label: "Dispatched", value: stats?.orders.dispatched || 0, color: "bg-blue-500" },
+                    { label: "Delivered", value: stats?.orders.delivered || 0, color: "bg-green-500" },
+                    { label: "RTO", value: stats?.orders.rto || 0, color: "bg-red-500" },
                   ].map((item) => {
-                    const total = dashboardStats.pendingOrders + dashboardStats.dispatchedOrders + dashboardStats.deliveredOrders + dashboardStats.rtoOrders;
-                    const percentage = (item.value / total) * 100;
+                    const total = (stats?.orders.pending || 0) + (stats?.orders.dispatched || 0) + 
+                                  (stats?.orders.delivered || 0) + (stats?.orders.rto || 0);
+                    const percentage = total > 0 ? (item.value / total) * 100 : 0;
                     return (
                       <div key={item.label}>
                         <div className="flex justify-between text-sm mb-1">
@@ -126,7 +213,7 @@ export default function Reports() {
                         </div>
                         <div className="h-2 bg-muted rounded-full overflow-hidden">
                           <div
-                            className={`h-full ${item.color} rounded-full`}
+                            className={`h-full ${item.color} transition-all`}
                             style={{ width: `${percentage}%` }}
                           />
                         </div>
@@ -143,30 +230,27 @@ export default function Reports() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>Prepaid</span>
-                      <span className="font-medium text-green-600">{prepaidOrders} orders</span>
-                    </div>
-                    <div className="h-2 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-green-500 rounded-full"
-                        style={{ width: `${(prepaidOrders / mockOrders.length) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>Cash on Delivery</span>
-                      <span className="font-medium text-orange-600">{codOrders} orders</span>
-                    </div>
-                    <div className="h-2 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-orange-500 rounded-full"
-                        style={{ width: `${(codOrders / mockOrders.length) * 100}%` }}
-                      />
-                    </div>
-                  </div>
+                  {[
+                    { label: "COD", value: codOrders, color: "bg-orange-500" },
+                    { label: "Prepaid", value: prepaidOrders, color: "bg-green-500" },
+                  ].map((item) => {
+                    const total = codOrders + prepaidOrders;
+                    const percentage = total > 0 ? (item.value / total) * 100 : 0;
+                    return (
+                      <div key={item.label}>
+                        <div className="flex justify-between text-sm mb-1">
+                          <span>{item.label}</span>
+                          <span className="font-medium">{item.value} ({percentage.toFixed(1)}%)</span>
+                        </div>
+                        <div className="h-2 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${item.color} transition-all`}
+                            style={{ width: `${percentage}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>
@@ -178,56 +262,76 @@ export default function Reports() {
             <Card>
               <CardContent className="pt-6">
                 <p className="text-sm text-muted-foreground">Total Orders</p>
-                <p className="text-2xl font-bold">{mockOrders.length}</p>
+                <p className="text-2xl font-bold">{stats?.orders.total || 0}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground">Avg Order Value</p>
-                <p className="text-2xl font-bold">₹{avgOrderValue.toFixed(0)}</p>
+                <p className="text-sm text-muted-foreground">Pending</p>
+                <p className="text-2xl font-bold text-yellow-600">{stats?.orders.pending || 0}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground">COD Orders</p>
-                <p className="text-2xl font-bold">{codOrders}</p>
+                <p className="text-sm text-muted-foreground">Dispatched</p>
+                <p className="text-2xl font-bold text-blue-600">{stats?.orders.dispatched || 0}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground">Prepaid Orders</p>
-                <p className="text-2xl font-bold">{prepaidOrders}</p>
+                <p className="text-sm text-muted-foreground">Delivered</p>
+                <p className="text-2xl font-bold text-green-600">{stats?.orders.delivered || 0}</p>
               </CardContent>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Revenue Summary</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-3 gap-6">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Revenue</p>
+                  <p className="text-xl font-bold">₹{(stats?.revenue.total || 0).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Pending Collection</p>
+                  <p className="text-xl font-bold text-orange-600">₹{(stats?.revenue.pending || 0).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Avg Order Value</p>
+                  <p className="text-xl font-bold">₹{avgOrderValue.toFixed(0)}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="inventory" className="space-y-6 mt-6">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <Card>
               <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground">Total Units</p>
-                <p className="text-2xl font-bold">{dashboardStats.totalInventory.toLocaleString()}</p>
+                <p className="text-sm text-muted-foreground">Total Products</p>
+                <p className="text-2xl font-bold">{stats?.products.total || 0}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">Total Variants</p>
+                <p className="text-2xl font-bold">{stats?.products.variants || 0}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">Low Stock Items</p>
+                <p className="text-2xl font-bold text-orange-600">{stats?.products.lowStock || 0}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-6">
                 <p className="text-sm text-muted-foreground">Inventory Value</p>
                 <p className="text-2xl font-bold">₹{totalInventoryValue.toLocaleString()}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground">Low Stock Items</p>
-                <p className="text-2xl font-bold text-orange-600">{dashboardStats.lowStockItems}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground">Total SKUs</p>
-                <p className="text-2xl font-bold">
-                  {mockProducts.reduce((sum, p) => sum + p.variants.length, 0)}
-                </p>
               </CardContent>
             </Card>
           </div>
@@ -237,31 +341,55 @@ export default function Reports() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <Card>
               <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground">Total Deliveries</p>
-                <p className="text-2xl font-bold">{dashboardStats.deliveredOrders}</p>
+                <p className="text-sm text-muted-foreground">Internal Deliveries</p>
+                <p className="text-2xl font-bold">{stats?.deliveries.total || 0}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground">RTO Count</p>
-                <p className="text-2xl font-bold text-red-600">{dashboardStats.rtoOrders}</p>
+                <p className="text-sm text-muted-foreground">Pending Delivery</p>
+                <p className="text-2xl font-bold text-orange-600">{stats?.deliveries.pending || 0}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground">Delivery Cost</p>
-                <p className="text-2xl font-bold">₹{dashboardStats.totalDeliveryCost.toLocaleString()}</p>
+                <p className="text-sm text-muted-foreground">Completed</p>
+                <p className="text-2xl font-bold text-green-600">{stats?.deliveries.completed || 0}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground">Avg Cost/Delivery</p>
-                <p className="text-2xl font-bold">
-                  ₹{(dashboardStats.totalDeliveryCost / dashboardStats.deliveredOrders).toFixed(0)}
-                </p>
+                <p className="text-sm text-muted-foreground">Open Complaints</p>
+                <p className="text-2xl font-bold text-red-600">{stats?.complaints.open || 0}</p>
               </CardContent>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Complaint Summary</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-4 gap-6">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total</p>
+                  <p className="text-xl font-bold">{stats?.complaints.total || 0}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Open</p>
+                  <p className="text-xl font-bold text-orange-600">{stats?.complaints.open || 0}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">In Progress</p>
+                  <p className="text-xl font-bold text-blue-600">{stats?.complaints.inProgress || 0}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Resolved</p>
+                  <p className="text-xl font-bold text-green-600">{stats?.complaints.resolved || 0}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

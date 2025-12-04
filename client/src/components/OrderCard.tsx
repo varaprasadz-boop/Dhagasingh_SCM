@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "./StatusBadge";
 import { Package, MapPin, Phone, Truck, CreditCard } from "lucide-react";
-import type { Order } from "@/lib/mockData";
+import type { Order } from "@shared/schema";
 
 interface OrderCardProps {
   order: Order;
@@ -12,8 +12,10 @@ interface OrderCardProps {
 }
 
 export function OrderCard({ order, onUpdateStatus, onViewDetails, compact = false }: OrderCardProps) {
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString("en-IN", {
+  const formatDate = (date: Date | string | null) => {
+    if (!date) return "-";
+    const d = typeof date === 'string' ? new Date(date) : date;
+    return d.toLocaleDateString("en-IN", {
       day: "numeric",
       month: "short",
       hour: "2-digit",
@@ -53,13 +55,7 @@ export function OrderCard({ order, onUpdateStatus, onViewDetails, compact = fals
         <div className="flex items-start gap-2">
           <Package className="h-4 w-4 mt-0.5 text-muted-foreground" />
           <div className="flex-1">
-            {order.items.map((item, idx) => (
-              <div key={idx} className="text-sm">
-                <span className="font-mono text-xs text-muted-foreground">{item.sku}</span>
-                <span className="mx-2">×</span>
-                <span>{item.quantity}</span>
-              </div>
-            ))}
+            <p className="text-sm text-muted-foreground">{order.customerName}</p>
           </div>
           <div className="text-right">
             <p className="font-semibold">₹{order.totalAmount}</p>
@@ -79,10 +75,10 @@ export function OrderCard({ order, onUpdateStatus, onViewDetails, compact = fals
             <Phone className="h-4 w-4 text-muted-foreground" />
             <span>{order.customerPhone}</span>
           </div>
-          {order.courierPartner && (
+          {order.courierPartnerId && (
             <div className="flex items-center gap-1.5">
               <Truck className="h-4 w-4 text-muted-foreground" />
-              <span>{order.courierPartner}</span>
+              <span className="text-xs">Courier assigned</span>
             </div>
           )}
           {order.awbNumber && (

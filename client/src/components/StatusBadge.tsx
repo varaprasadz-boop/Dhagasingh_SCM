@@ -1,8 +1,7 @@
 import { Badge } from "@/components/ui/badge";
-import type { OrderStatus, InternalDeliveryStatus } from "@/lib/mockData";
 
 interface StatusBadgeProps {
-  status: OrderStatus | InternalDeliveryStatus | "open" | "in_progress" | "resolved" | "rejected" | "active" | "inactive";
+  status: string;
   className?: string;
 }
 
@@ -13,6 +12,7 @@ const statusConfig: Record<string, { label: string; variant: "default" | "second
   rto: { label: "RTO", variant: "destructive" },
   returned: { label: "RETURNED", variant: "outline" },
   refunded: { label: "REFUNDED", variant: "outline" },
+  cancelled: { label: "CANCELLED", variant: "outline" },
   open: { label: "OPEN", variant: "destructive" },
   in_progress: { label: "IN PROGRESS", variant: "secondary" },
   resolved: { label: "RESOLVED", variant: "default" },

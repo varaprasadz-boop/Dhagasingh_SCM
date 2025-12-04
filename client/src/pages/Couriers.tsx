@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { DataTable } from "@/components/DataTable";
 import { SearchInput } from "@/components/SearchInput";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
   DialogContent,
@@ -15,11 +17,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Plus, Edit, Trash2, Zap, Settings } from "lucide-react";
-import { mockCouriers, type CourierPartner } from "@/lib/mockData";
+import { Plus, Edit, Trash2, Zap, Settings, AlertCircle } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import type { CourierPartner } from "@shared/schema";
 
 export default function Couriers() {
-  const [couriers, setCouriers] = useState(mockCouriers);
   const [searchQuery, setSearchQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCourier, setEditingCourier] = useState<CourierPartner | null>(null);
@@ -31,16 +34,87 @@ export default function Couriers() {
     type: "third_party" as "third_party" | "in_house",
     contactPerson: "",
     phone: "",
-    apiEnabled: false,
+    isActive: true,
   });
 
   const [apiKey, setApiKey] = useState("");
+  const { toast } = useToast();
 
-  const filteredCouriers = couriers.filter(
-    (c) =>
-      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.contactPerson.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const { data: couriers = [], isLoading, error } = useQuery<CourierPartner[]>({
+    queryKey: ["/api/couriers"],
+  });
+
+  const { data: delhiveryStatus } = useQuery<{ configured: boolean; mode: string }>({
+    queryKey: ["/api/courier/delhivery/status"],
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (data: Partial<CourierPartner>) => {
+      const res = await apiRequest("POST", "/api/couriers", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/couriers"] });
+      setDialogOpen(false);
+      resetForm();
+      toast({ title: "Success", description: "Courier partner added successfully" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to add courier partner", variant: "destructive" });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Partial<CourierPartner> }) => {
+      const res = await apiRequest("PATCH", `/api/couriers/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/couriers"] });
+      setDialogOpen(false);
+      setApiDialogOpen(false);
+      resetForm();
+      toast({ title: "Success", description: "Courier partner updated successfully" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to update courier partner", variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("DELETE", `/api/couriers/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/couriers"] });
+      toast({ title: "Success", description: "Courier partner removed successfully" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to remove courier partner", variant: "destructive" });
+    },
+  });
+
+  const resetForm = () => {
+    setEditingCourier(null);
+    setFormData({
+      name: "",
+      type: "third_party",
+      contactPerson: "",
+      phone: "",
+      isActive: true,
+    });
+  };
+
+  const filteredCouriers = useMemo(() => {
+    if (!searchQuery) return couriers;
+    const query = searchQuery.toLowerCase();
+    return couriers.filter(
+      (c) =>
+        c.name.toLowerCase().includes(query) ||
+        (c.contactPerson || "").toLowerCase().includes(query)
+    );
+  }, [couriers, searchQuery]);
 
   const columns = [
     { key: "name", header: "Name", sortable: true },
@@ -53,8 +127,16 @@ export default function Couriers() {
         </Badge>
       ),
     },
-    { key: "contactPerson", header: "Contact Person" },
-    { key: "phone", header: "Phone" },
+    { 
+      key: "contactPerson", 
+      header: "Contact Person",
+      render: (c: CourierPartner) => c.contactPerson || "-"
+    },
+    { 
+      key: "phone", 
+      header: "Phone",
+      render: (c: CourierPartner) => c.phone || "-"
+    },
     {
       key: "apiEnabled",
       header: "API",
@@ -66,6 +148,15 @@ export default function Couriers() {
         ) : (
           "-"
         ),
+    },
+    {
+      key: "isActive",
+      header: "Status",
+      render: (c: CourierPartner) => (
+        <Badge variant={c.isActive ? "default" : "secondary"}>
+          {c.isActive ? "Active" : "Inactive"}
+        </Badge>
+      ),
     },
     {
       key: "actions",
@@ -103,7 +194,9 @@ export default function Couriers() {
             size="icon"
             onClick={(e) => {
               e.stopPropagation();
-              handleDelete(c.id);
+              if (confirm("Are you sure you want to delete this courier partner?")) {
+                deleteMutation.mutate(c.id);
+              }
             }}
             data-testid={`button-delete-courier-${c.id}`}
           >
@@ -118,71 +211,77 @@ export default function Couriers() {
     setEditingCourier(courier);
     setFormData({
       name: courier.name,
-      type: courier.type,
-      contactPerson: courier.contactPerson,
-      phone: courier.phone,
-      apiEnabled: courier.apiEnabled,
+      type: courier.type as "third_party" | "in_house",
+      contactPerson: courier.contactPerson || "",
+      phone: courier.phone || "",
+      isActive: courier.isActive,
     });
     setDialogOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    setCouriers((prev) => prev.filter((c) => c.id !== id));
-  };
-
   const handleSubmit = () => {
-    if (editingCourier) {
-      setCouriers((prev) =>
-        prev.map((c) =>
-          c.id === editingCourier.id ? { ...c, ...formData } : c
-        )
-      );
-    } else {
-      const newCourier: CourierPartner = {
-        id: String(couriers.length + 1),
-        ...formData,
-      };
-      setCouriers((prev) => [...prev, newCourier]);
-    }
+    const data = {
+      name: formData.name,
+      type: formData.type,
+      contactPerson: formData.contactPerson || null,
+      phone: formData.phone || null,
+      isActive: formData.isActive,
+    };
 
-    setDialogOpen(false);
-    setEditingCourier(null);
-    setFormData({
-      name: "",
-      type: "third_party",
-      contactPerson: "",
-      phone: "",
-      apiEnabled: false,
-    });
+    if (editingCourier) {
+      updateMutation.mutate({ id: editingCourier.id, data });
+    } else {
+      createMutation.mutate(data);
+    }
   };
 
   const handleApiSave = () => {
     if (!selectedCourier) return;
 
-    setCouriers((prev) =>
-      prev.map((c) =>
-        c.id === selectedCourier.id
-          ? { ...c, apiEnabled: !!apiKey, apiKey: apiKey || undefined }
-          : c
-      )
-    );
-
-    setApiDialogOpen(false);
-    setApiKey("");
-    setSelectedCourier(null);
+    updateMutation.mutate({
+      id: selectedCourier.id,
+      data: {
+        apiEnabled: !!apiKey,
+        apiKey: apiKey || null,
+      },
+    });
   };
 
   const handleOpenCreate = () => {
-    setEditingCourier(null);
-    setFormData({
-      name: "",
-      type: "third_party",
-      contactPerson: "",
-      phone: "",
-      apiEnabled: false,
-    });
+    resetForm();
     setDialogOpen(true);
   };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i}>
+              <CardContent className="pt-6">
+                <Skeleton className="h-4 w-20 mb-2" />
+                <Skeleton className="h-8 w-12" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 space-y-4">
+        <AlertCircle className="h-12 w-12 text-destructive" />
+        <p className="text-destructive">Failed to load courier partners</p>
+        <Button onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/couriers"] })}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -203,13 +302,13 @@ export default function Couriers() {
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Total Partners</p>
-            <p className="text-2xl font-bold">{couriers.length}</p>
+            <p className="text-2xl font-bold" data-testid="stat-total">{couriers.length}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Third Party</p>
-            <p className="text-2xl font-bold">
+            <p className="text-2xl font-bold" data-testid="stat-third-party">
               {couriers.filter((c) => c.type === "third_party").length}
             </p>
           </CardContent>
@@ -217,7 +316,7 @@ export default function Couriers() {
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">In-House</p>
-            <p className="text-2xl font-bold">
+            <p className="text-2xl font-bold" data-testid="stat-in-house">
               {couriers.filter((c) => c.type === "in_house").length}
             </p>
           </CardContent>
@@ -225,18 +324,37 @@ export default function Couriers() {
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">API Connected</p>
-            <p className="text-2xl font-bold">
+            <p className="text-2xl font-bold" data-testid="stat-api-connected">
               {couriers.filter((c) => c.apiEnabled).length}
             </p>
           </CardContent>
         </Card>
       </div>
 
+      {delhiveryStatus && (
+        <Card className="bg-muted/50">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <Zap className={`h-5 w-5 ${delhiveryStatus.configured ? "text-green-500" : "text-muted-foreground"}`} />
+              <div>
+                <p className="font-medium">Delhivery Integration</p>
+                <p className="text-sm text-muted-foreground">
+                  {delhiveryStatus.configured 
+                    ? `Connected (${delhiveryStatus.mode} mode)` 
+                    : "Not configured - Set DELHIVERY_API_TOKEN in environment variables"}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <SearchInput
         placeholder="Search couriers..."
         value={searchQuery}
         onChange={setSearchQuery}
         className="max-w-md"
+        data-testid="input-search-couriers"
       />
 
       <Card>
@@ -323,13 +441,29 @@ export default function Couriers() {
                 />
               </div>
             </div>
+            <div className="flex items-center space-x-2">
+              <Switch
+                checked={formData.isActive}
+                onCheckedChange={(checked) =>
+                  setFormData((prev) => ({ ...prev, isActive: checked }))
+                }
+                data-testid="switch-courier-active"
+              />
+              <Label>Active</Label>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleSubmit} disabled={!formData.name} data-testid="button-submit-courier">
-              {editingCourier ? "Update" : "Add"} Courier
+            <Button 
+              onClick={handleSubmit} 
+              disabled={!formData.name || createMutation.isPending || updateMutation.isPending} 
+              data-testid="button-submit-courier"
+            >
+              {createMutation.isPending || updateMutation.isPending 
+                ? "Saving..." 
+                : editingCourier ? "Update" : "Add"} Courier
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -372,8 +506,12 @@ export default function Couriers() {
             <Button variant="outline" onClick={() => setApiDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleApiSave} data-testid="button-save-api">
-              Save Configuration
+            <Button 
+              onClick={handleApiSave} 
+              disabled={updateMutation.isPending}
+              data-testid="button-save-api"
+            >
+              {updateMutation.isPending ? "Saving..." : "Save Configuration"}
             </Button>
           </DialogFooter>
         </DialogContent>

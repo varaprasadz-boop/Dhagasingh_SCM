@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { KPICard } from "@/components/KPICard";
 import { QuickActionButton } from "@/components/QuickActionButton";
 import { DataTable } from "@/components/DataTable";
@@ -7,6 +9,7 @@ import { StockAlertList } from "@/components/StockAlertList";
 import { ReceiveStockModal } from "@/components/ReceiveStockModal";
 import { DispatchModal } from "@/components/DispatchModal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Package,
   ShoppingCart,
@@ -18,22 +21,94 @@ import {
   FileUp,
   Camera,
 } from "lucide-react";
-import {
-  mockOrders,
-  mockProducts,
-  dashboardStats,
-  type Order,
-} from "@/lib/mockData";
 import { useAuth } from "@/contexts/AuthContext";
+import type { Order, Product } from "@shared/schema";
+
+interface DispatchOrder {
+  id: string;
+  orderNumber: string;
+  customerName: string;
+  paymentMethod: string;
+  totalAmount: string;
+}
+
+interface DashboardStats {
+  orders: {
+    total: number;
+    pending: number;
+    dispatched: number;
+    delivered: number;
+    rto: number;
+  };
+  products: {
+    total: number;
+    variants: number;
+    lowStock: number;
+  };
+  complaints: {
+    total: number;
+    open: number;
+    inProgress: number;
+    resolved: number;
+  };
+  deliveries: {
+    total: number;
+    pending: number;
+    completed: number;
+  };
+  revenue: {
+    total: number;
+    pending: number;
+  };
+}
+
+interface ProductWithVariants extends Product {
+  variants: Array<{
+    id: string;
+    sku: string;
+    name?: string | null;
+    color?: string | null;
+    size?: string | null;
+    stockQuantity: number;
+    lowStockThreshold?: number | null;
+    costPrice: string;
+    sellingPrice: string;
+    mrp?: string | null;
+  }>;
+}
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const [, navigate] = useLocation();
   const [receiveModalOpen, setReceiveModalOpen] = useState(false);
   const [dispatchModalOpen, setDispatchModalOpen] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<DispatchOrder | null>(null);
 
-  const allVariants = mockProducts.flatMap((p) => p.variants);
-  const pendingOrders = mockOrders.filter((o) => o.status === "pending");
+  const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
+    queryKey: ["/api/dashboard/stats"],
+  });
+
+  const { data: orders = [], isLoading: ordersLoading } = useQuery<Order[]>({
+    queryKey: ["/api/orders"],
+  });
+
+  const { data: products = [] } = useQuery<ProductWithVariants[]>({
+    queryKey: ["/api/products"],
+  });
+
+  const pendingOrders = orders.filter((o) => o.status === "pending");
+  const recentOrders = orders.slice(0, 5);
+
+  const allVariants = products.flatMap((p) =>
+    p.variants.map((v) => ({
+      id: v.id,
+      productName: p.name,
+      variantName: v.name || `${v.color || ""} ${v.size || ""}`.trim() || "Default",
+      sku: v.sku,
+      stockQuantity: v.stockQuantity,
+      lowStockThreshold: v.lowStockThreshold || 10,
+    }))
+  );
 
   const orderColumns = [
     { key: "orderNumber", header: "Order #", sortable: true },
@@ -65,10 +140,46 @@ export default function Dashboard() {
     },
   ];
 
-  const handleDispatch = (order: Order) => {
-    setSelectedOrder(order);
+  const handleDispatch = (order: Order | DispatchOrder) => {
+    setSelectedOrder({
+      id: order.id,
+      orderNumber: order.orderNumber,
+      customerName: order.customerName,
+      paymentMethod: order.paymentMethod,
+      totalAmount: order.totalAmount,
+    });
     setDispatchModalOpen(true);
   };
+
+  const isLoading = statsLoading || ordersLoading;
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-64" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i}>
+              <CardContent className="pt-6">
+                <Skeleton className="h-4 w-24 mb-2" />
+                <Skeleton className="h-8 w-16" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i}>
+              <CardContent className="pt-6">
+                <Skeleton className="h-4 w-24 mb-2" />
+                <Skeleton className="h-8 w-16" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -82,54 +193,57 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           title="Total Inventory"
-          value={dashboardStats.totalInventory.toLocaleString()}
+          value={(stats?.products.variants || 0).toLocaleString()}
           icon={Package}
-          trend={{ value: 12, positive: true }}
+          data-testid="kpi-inventory"
         />
         <KPICard
           title="Pending Orders"
-          value={dashboardStats.pendingOrders}
+          value={stats?.orders.pending || 0}
           icon={ShoppingCart}
-          subtitle="3 high priority"
+          subtitle={`${pendingOrders.filter(o => o.paymentMethod === "cod").length} COD`}
+          data-testid="kpi-pending"
         />
         <KPICard
-          title="Dispatched Today"
-          value={dashboardStats.dispatchedOrders}
+          title="Dispatched"
+          value={stats?.orders.dispatched || 0}
           icon={Truck}
-          trend={{ value: 8, positive: true }}
+          data-testid="kpi-dispatched"
         />
         <KPICard
           title="Delivered"
-          value={dashboardStats.deliveredOrders}
+          value={stats?.orders.delivered || 0}
           icon={CheckCircle2}
-          trend={{ value: 15, positive: true }}
+          data-testid="kpi-delivered"
         />
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           title="RTO Orders"
-          value={dashboardStats.rtoOrders}
+          value={stats?.orders.rto || 0}
           icon={RotateCcw}
-          trend={{ value: 5, positive: false }}
+          data-testid="kpi-rto"
         />
         <KPICard
           title="Open Complaints"
-          value={dashboardStats.openComplaints}
+          value={stats?.complaints.open || 0}
           icon={AlertCircle}
-          trend={{ value: 2, positive: false }}
+          data-testid="kpi-complaints"
         />
         <KPICard
-          title="Delivery Costs"
-          value={`₹${dashboardStats.totalDeliveryCost.toLocaleString()}`}
+          title="Revenue"
+          value={`₹${(stats?.revenue.total || 0).toLocaleString()}`}
           icon={Truck}
-          subtitle="This month"
+          subtitle="Paid orders"
+          data-testid="kpi-revenue"
         />
         <KPICard
           title="Low Stock Items"
-          value={dashboardStats.lowStockItems}
+          value={stats?.products.lowStock || 0}
           icon={Package}
           subtitle="Below threshold"
+          data-testid="kpi-low-stock"
         />
       </div>
 
@@ -139,6 +253,7 @@ export default function Dashboard() {
           label="Receive Stock"
           description="Add inventory"
           onClick={() => setReceiveModalOpen(true)}
+          data-testid="action-receive"
         />
         <QuickActionButton
           icon={Truck}
@@ -147,20 +262,25 @@ export default function Dashboard() {
           onClick={() => {
             if (pendingOrders.length > 0) {
               handleDispatch(pendingOrders[0]);
+            } else {
+              navigate("/orders");
             }
           }}
+          data-testid="action-dispatch"
         />
         <QuickActionButton
           icon={Camera}
           label="Scan Invoice"
           description="OCR capture"
-          onClick={() => console.log("Navigate to scan")}
+          onClick={() => navigate("/scan")}
+          data-testid="action-scan"
         />
         <QuickActionButton
           icon={FileUp}
           label="Import Orders"
           description="CSV upload"
-          onClick={() => console.log("Navigate to import")}
+          onClick={() => navigate("/orders")}
+          data-testid="action-import"
         />
       </div>
 
@@ -172,16 +292,17 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <DataTable
-                data={mockOrders.slice(0, 5)}
+                data={recentOrders}
                 columns={orderColumns}
                 getRowId={(order) => order.id}
                 onRowClick={handleDispatch}
+                emptyMessage="No orders yet"
               />
             </CardContent>
           </Card>
         </div>
         <div>
-          <StockAlertList variants={allVariants} threshold={40} />
+          <StockAlertList variants={allVariants} threshold={10} />
         </div>
       </div>
 

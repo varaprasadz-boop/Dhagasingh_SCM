@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -17,10 +18,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { mockCouriers, type Order, type CourierPartner } from "@/lib/mockData";
+import type { CourierPartner, Order } from "@shared/schema";
+
+interface DispatchOrder {
+  id: string;
+  orderNumber: string;
+  customerName: string;
+  paymentMethod: string;
+  totalAmount: string;
+}
 
 interface DispatchModalProps {
-  order: Order | null;
+  order: DispatchOrder | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDispatch?: (data: {
@@ -40,7 +49,11 @@ export function DispatchModal({ order, open, onOpenChange, onDispatch }: Dispatc
   const [driverPhone, setDriverPhone] = useState("");
   const [deliveryCost, setDeliveryCost] = useState("");
 
-  const filteredCouriers = mockCouriers.filter((c) => c.type === deliveryType);
+  const { data: couriers = [] } = useQuery<CourierPartner[]>({
+    queryKey: ["/api/couriers"],
+  });
+
+  const filteredCouriers = couriers.filter((c) => c.type === deliveryType && c.isActive);
 
   const handleSubmit = () => {
     if (!selectedCourier) return;

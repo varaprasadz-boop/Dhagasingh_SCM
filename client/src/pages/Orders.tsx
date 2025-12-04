@@ -1,12 +1,14 @@
 import { useState, useMemo } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { DataTable } from "@/components/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SearchInput } from "@/components/SearchInput";
 import { FileUpload } from "@/components/FileUpload";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -33,12 +35,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { FileUp, Truck, Download, Eye, MapPin, Phone, Mail, Package, Clock, ArrowUpDown } from "lucide-react";
-import { mockOrders, mockCouriers, type Order, type OrderStatus } from "@/lib/mockData";
+import { FileUp, Truck, Download, Eye, MapPin, Phone, Mail, Package, Clock, ArrowUpDown, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import type { OrderWithItems, CourierPartner, User } from "@shared/schema";
 
+type OrderStatus = "pending" | "dispatched" | "delivered" | "rto" | "returned" | "refunded";
 type SortOption = "newest" | "oldest" | "amount_high" | "amount_low";
 
-function getAgeing(createdAt: string): number {
+function getAgeing(createdAt: string | Date | null): number {
+  if (!createdAt) return 0;
   const created = new Date(createdAt);
   const now = new Date();
   const diffTime = Math.abs(now.getTime() - created.getTime());
@@ -52,12 +58,12 @@ function formatAgeing(days: number): string {
 }
 
 export default function Orders() {
-  const [orders, setOrders] = useState(mockOrders);
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
   const [sortOption, setSortOption] = useState<SortOption>("newest");
-  const [selectedOrders, setSelectedOrders] = useState<Order[]>([]);
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [selectedOrders, setSelectedOrders] = useState<OrderWithItems[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<OrderWithItems | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
   const [dispatchDialogOpen, setDispatchDialogOpen] = useState(false);
@@ -71,12 +77,78 @@ export default function Orders() {
     deliveryCost: "",
   });
 
+  const { data: orders = [], isLoading: ordersLoading } = useQuery<OrderWithItems[]>({
+    queryKey: ["/api/orders"],
+  });
+
+  const { data: couriers = [] } = useQuery<CourierPartner[]>({
+    queryKey: ["/api/couriers"],
+  });
+
+  const { data: users = [] } = useQuery<User[]>({
+    queryKey: ["/api/users"],
+  });
+
+  const dispatchMutation = useMutation({
+    mutationFn: (data: { orderId: string; courierPartnerId: string; courierType: string; awbNumber?: string; assignedTo?: string }) =>
+      apiRequest("POST", `/api/orders/${data.orderId}/dispatch`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Order dispatched successfully" });
+      setDispatchDialogOpen(false);
+      setDetailSheetOpen(false);
+      resetDispatchForm();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to dispatch order", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: (data: { orderId: string; status: string; comment?: string }) =>
+      apiRequest("POST", `/api/orders/${data.orderId}/status`, { status: data.status, comment: data.comment }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Order status updated" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to update status", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const importMutation = useMutation({
+    mutationFn: (data: { csvData: string; fileName: string }) =>
+      apiRequest("POST", "/api/orders/import", data),
+    onSuccess: (response: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ 
+        title: "Import completed", 
+        description: `Imported ${response.imported} orders. ${response.errors > 0 ? `${response.errors} errors.` : ''}` 
+      });
+      setImportDialogOpen(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Import failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const resetDispatchForm = () => {
+    setDispatchForm({
+      courierType: "third_party",
+      courierId: "",
+      awbNumber: "",
+      assignedTo: "",
+      dispatchDate: new Date().toISOString().split("T")[0],
+      deliveryCost: "",
+    });
+  };
+
   const filteredAndSortedOrders = useMemo(() => {
     let result = orders.filter((order) => {
       const matchesSearch =
         order.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
         order.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.customerEmail.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (order.customerEmail || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
         order.shippingAddress.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === "all" || order.status === statusFilter;
       return matchesSearch && matchesStatus;
@@ -85,13 +157,13 @@ export default function Orders() {
     result = [...result].sort((a, b) => {
       switch (sortOption) {
         case "oldest":
-          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
         case "newest":
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
         case "amount_high":
-          return b.totalAmount - a.totalAmount;
+          return parseFloat(String(b.totalAmount)) - parseFloat(String(a.totalAmount));
         case "amount_low":
-          return a.totalAmount - b.totalAmount;
+          return parseFloat(String(a.totalAmount)) - parseFloat(String(b.totalAmount));
         default:
           return 0;
       }
@@ -106,7 +178,7 @@ export default function Orders() {
     {
       key: "shippingAddress",
       header: "Address",
-      render: (order: Order) => (
+      render: (order: OrderWithItems) => (
         <span className="text-sm text-muted-foreground truncate max-w-[200px] block">
           {order.shippingAddress}
         </span>
@@ -115,9 +187,9 @@ export default function Orders() {
     {
       key: "items",
       header: "Items",
-      render: (order: Order) => (
+      render: (order: OrderWithItems) => (
         <span className="text-sm text-muted-foreground">
-          {order.items.length} item(s)
+          {order.items?.length || 0} item(s)
         </span>
       ),
     },
@@ -125,12 +197,12 @@ export default function Orders() {
       key: "totalAmount",
       header: "Amount",
       sortable: true,
-      render: (order: Order) => `₹${order.totalAmount}`,
+      render: (order: OrderWithItems) => `₹${order.totalAmount}`,
     },
     {
       key: "ageing",
       header: "Ageing",
-      render: (order: Order) => {
+      render: (order: OrderWithItems) => {
         const days = getAgeing(order.createdAt);
         const colorClass = days > 7 
           ? "text-red-500" 
@@ -155,7 +227,7 @@ export default function Orders() {
     {
       key: "paymentMethod",
       header: "Payment",
-      render: (order: Order) => (
+      render: (order: OrderWithItems) => (
         <span
           className={`text-xs font-medium ${
             order.paymentMethod === "cod"
@@ -170,17 +242,17 @@ export default function Orders() {
     {
       key: "courierPartner",
       header: "Courier",
-      render: (order: Order) => order.courierPartner || "-",
+      render: (order: OrderWithItems) => order.courierPartner?.name || "-",
     },
     {
       key: "status",
       header: "Status",
-      render: (order: Order) => <StatusBadge status={order.status} />,
+      render: (order: OrderWithItems) => <StatusBadge status={order.status} />,
     },
     {
       key: "actions",
       header: "",
-      render: (order: Order) => (
+      render: (order: OrderWithItems) => (
         <Button
           variant="ghost"
           size="sm"
@@ -198,45 +270,20 @@ export default function Orders() {
     },
   ];
 
-  const handleStatusUpdate = (orderId: string, newStatus: OrderStatus) => {
-    setOrders((prev) =>
-      prev.map((order) =>
-        order.id === orderId ? { ...order, status: newStatus } : order
-      )
-    );
+  const handleDispatch = () => {
+    if (!selectedOrder || !dispatchForm.courierId) return;
+
+    dispatchMutation.mutate({
+      orderId: selectedOrder.id,
+      courierPartnerId: dispatchForm.courierId,
+      courierType: dispatchForm.courierType,
+      awbNumber: dispatchForm.awbNumber || undefined,
+      assignedTo: dispatchForm.assignedTo || undefined,
+    });
   };
 
-  const handleDispatch = () => {
-    if (!selectedOrder) return;
-
-    const courier = mockCouriers.find((c) => c.id === dispatchForm.courierId);
-    
-    setOrders((prev) =>
-      prev.map((order) =>
-        order.id === selectedOrder.id
-          ? {
-              ...order,
-              status: "dispatched" as OrderStatus,
-              courierPartner: courier?.name,
-              courierType: dispatchForm.courierType,
-              awbNumber: dispatchForm.awbNumber || undefined,
-              assignedTo: dispatchForm.assignedTo || undefined,
-              dispatchDate: dispatchForm.dispatchDate,
-              deliveryCost: parseFloat(dispatchForm.deliveryCost) || undefined,
-            }
-          : order
-      )
-    );
-
-    setDispatchDialogOpen(false);
-    setDispatchForm({
-      courierType: "third_party",
-      courierId: "",
-      awbNumber: "",
-      assignedTo: "",
-      dispatchDate: new Date().toISOString().split("T")[0],
-      deliveryCost: "",
-    });
+  const handleStatusUpdate = (orderId: string, newStatus: string) => {
+    updateStatusMutation.mutate({ orderId, status: newStatus });
   };
 
   const handleBulkDispatch = () => {
@@ -244,6 +291,11 @@ export default function Orders() {
       setSelectedOrder(selectedOrders[0]);
       setDispatchDialogOpen(true);
     }
+  };
+
+  const handleImportCSV = async (file: File) => {
+    const text = await file.text();
+    importMutation.mutate({ csvData: text, fileName: file.name });
   };
 
   const statusCounts = {
@@ -254,8 +306,26 @@ export default function Orders() {
     rto: orders.filter((o) => o.status === "rto").length,
   };
 
-  const thirdPartyCouriers = mockCouriers.filter((c) => c.type === "third_party");
-  const inHouseCouriers = mockCouriers.filter((c) => c.type === "in_house");
+  const thirdPartyCouriers = couriers.filter((c) => c.type === "third_party");
+  const inHouseCouriers = couriers.filter((c) => c.type === "in_house");
+  const deliveryUsers = users.filter((u) => u.roleId);
+
+  if (ordersLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Orders</h1>
+            <p className="text-muted-foreground">Manage and track all your orders</p>
+          </div>
+        </div>
+        <div className="space-y-4">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-[400px] w-full" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -290,11 +360,15 @@ export default function Orders() {
                     accept=".csv"
                     label="Upload Orders CSV"
                     description="Shopify export format"
-                    onUpload={(file) => {
-                      console.log("Importing orders from:", file.name);
-                      setImportDialogOpen(false);
-                    }}
+                    onUpload={handleImportCSV}
+                    disabled={importMutation.isPending}
                   />
+                  {importMutation.isPending && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Importing orders...
+                    </div>
+                  )}
                 </TabsContent>
                 <TabsContent value="dispatch" className="space-y-4 mt-4">
                   <p className="text-sm text-muted-foreground">
@@ -385,7 +459,7 @@ export default function Orders() {
               setSelectedOrder(order);
               setDetailSheetOpen(true);
             }}
-            emptyMessage="No orders found"
+            emptyMessage="No orders found. Import orders from Shopify to get started."
           />
         </CardContent>
       </Card>
@@ -413,14 +487,18 @@ export default function Orders() {
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{selectedOrder.customerName}</span>
                     </div>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Mail className="h-4 w-4" />
-                      {selectedOrder.customerEmail}
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Phone className="h-4 w-4" />
-                      {selectedOrder.customerPhone}
-                    </div>
+                    {selectedOrder.customerEmail && (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Mail className="h-4 w-4" />
+                        {selectedOrder.customerEmail}
+                      </div>
+                    )}
+                    {selectedOrder.customerPhone && (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Phone className="h-4 w-4" />
+                        {selectedOrder.customerPhone}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -439,18 +517,18 @@ export default function Orders() {
                 <div>
                   <h3 className="text-sm font-semibold text-muted-foreground mb-2">ORDER ITEMS</h3>
                   <div className="space-y-2">
-                    {selectedOrder.items.map((item, idx) => (
+                    {selectedOrder.items?.map((item, idx) => (
                       <div key={idx} className="flex items-center justify-between p-2 bg-muted rounded-md">
                         <div className="flex items-center gap-2">
                           <Package className="h-4 w-4 text-muted-foreground" />
                           <div>
                             <p className="text-sm font-medium">{item.productName}</p>
-                            <p className="text-xs text-muted-foreground font-mono">{item.sku} | {item.color} | {item.size}</p>
+                            <p className="text-xs text-muted-foreground font-mono">{item.sku}</p>
                           </div>
                         </div>
                         <div className="text-right">
                           <p className="text-sm font-medium">₹{item.price} x {item.quantity}</p>
-                          <p className="text-xs text-muted-foreground">₹{item.price * item.quantity}</p>
+                          <p className="text-xs text-muted-foreground">₹{parseFloat(String(item.price)) * item.quantity}</p>
                         </div>
                       </div>
                     ))}
@@ -481,7 +559,7 @@ export default function Orders() {
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Courier</span>
-                          <span>{selectedOrder.courierPartner}</span>
+                          <span>{selectedOrder.courierPartner.name}</span>
                         </div>
                         {selectedOrder.awbNumber && (
                           <div className="flex justify-between">
@@ -489,10 +567,10 @@ export default function Orders() {
                             <span className="font-mono">{selectedOrder.awbNumber}</span>
                           </div>
                         )}
-                        {selectedOrder.assignedTo && (
+                        {selectedOrder.assignedUser && (
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Assigned To</span>
-                            <span>{selectedOrder.assignedTo}</span>
+                            <span>{selectedOrder.assignedUser.name}</span>
                           </div>
                         )}
                         {selectedOrder.dispatchDate && (
@@ -525,8 +603,12 @@ export default function Orders() {
                       className="w-full"
                       variant="outline"
                       onClick={() => handleStatusUpdate(selectedOrder.id, "delivered")}
+                      disabled={updateStatusMutation.isPending}
                       data-testid="button-mark-delivered"
                     >
+                      {updateStatusMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : null}
                       Mark as Delivered
                     </Button>
                   )}
@@ -593,39 +675,47 @@ export default function Orders() {
             </div>
 
             {dispatchForm.courierType === "third_party" && (
-              <>
-                <div className="space-y-2">
-                  <Label>Dispatch Date</Label>
-                  <Input
-                    type="date"
-                    value={dispatchForm.dispatchDate}
-                    onChange={(e) => setDispatchForm((prev) => ({ ...prev, dispatchDate: e.target.value }))}
-                    data-testid="input-dispatch-date"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>AWB Number</Label>
-                  <Input
-                    value={dispatchForm.awbNumber}
-                    onChange={(e) => setDispatchForm((prev) => ({ ...prev, awbNumber: e.target.value }))}
-                    placeholder="Enter AWB number"
-                    data-testid="input-awb-number"
-                  />
-                </div>
-              </>
+              <div className="space-y-2">
+                <Label>AWB Number</Label>
+                <Input
+                  value={dispatchForm.awbNumber}
+                  onChange={(e) => setDispatchForm((prev) => ({ ...prev, awbNumber: e.target.value }))}
+                  placeholder="Enter AWB/Tracking number"
+                  data-testid="input-awb-number"
+                />
+              </div>
             )}
 
             {dispatchForm.courierType === "in_house" && (
               <div className="space-y-2">
-                <Label>Assigned To</Label>
-                <Input
+                <Label>Assign To</Label>
+                <Select
                   value={dispatchForm.assignedTo}
-                  onChange={(e) => setDispatchForm((prev) => ({ ...prev, assignedTo: e.target.value }))}
-                  placeholder="Employee name"
-                  data-testid="input-assigned-to"
-                />
+                  onValueChange={(v) => setDispatchForm((prev) => ({ ...prev, assignedTo: v }))}
+                >
+                  <SelectTrigger data-testid="select-assign-to">
+                    <SelectValue placeholder="Select delivery person" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {deliveryUsers.map((user) => (
+                      <SelectItem key={user.id} value={user.id}>
+                        {user.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
+
+            <div className="space-y-2">
+              <Label>Dispatch Date</Label>
+              <Input
+                type="date"
+                value={dispatchForm.dispatchDate}
+                onChange={(e) => setDispatchForm((prev) => ({ ...prev, dispatchDate: e.target.value }))}
+                data-testid="input-dispatch-date"
+              />
+            </div>
 
             <div className="space-y-2">
               <Label>Delivery Cost (₹)</Label>
@@ -633,7 +723,7 @@ export default function Orders() {
                 type="number"
                 value={dispatchForm.deliveryCost}
                 onChange={(e) => setDispatchForm((prev) => ({ ...prev, deliveryCost: e.target.value }))}
-                placeholder="Optional"
+                placeholder="0.00"
                 data-testid="input-delivery-cost"
               />
             </div>
@@ -643,11 +733,16 @@ export default function Orders() {
             <Button variant="outline" onClick={() => setDispatchDialogOpen(false)}>
               Cancel
             </Button>
-            <Button
-              onClick={handleDispatch}
-              disabled={!dispatchForm.courierId}
+            <Button 
+              onClick={handleDispatch} 
+              disabled={!dispatchForm.courierId || dispatchMutation.isPending}
               data-testid="button-confirm-dispatch"
             >
+              {dispatchMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Truck className="h-4 w-4 mr-2" />
+              )}
               Dispatch
             </Button>
           </DialogFooter>

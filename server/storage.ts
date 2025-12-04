@@ -202,7 +202,13 @@ class DatabaseStorage implements IStorage {
   }
 
   async createPermission(permission: InsertPermission): Promise<Permission> {
-    const [created] = await db.insert(permissions).values(permission).returning();
+    const id = crypto.randomUUID();
+    await db.insert(permissions).values({ ...permission, id });
+    
+    const created = await this.getPermissionById(id);
+    if (!created) {
+      throw new Error("Failed to create permission");
+    }
     return created;
   }
 
@@ -256,7 +262,14 @@ class DatabaseStorage implements IStorage {
   }
 
   async createRole(role: InsertRole): Promise<Role> {
-    const [created] = await db.insert(roles).values(role).returning();
+    const id = crypto.randomUUID();
+    await db.insert(roles).values({ ...role, id });
+    
+    const result = await db.select().from(roles).where(eq(roles.id, id)).limit(1);
+    const created = result?.[0];
+    if (!created) {
+      throw new Error("Failed to create role");
+    }
     return created;
   }
 
@@ -278,9 +291,14 @@ class DatabaseStorage implements IStorage {
 
   // Role Permissions
   async assignPermissionToRole(roleId: string, permissionId: string): Promise<RolePermission> {
-    const [created] = await db.insert(rolePermissions)
-      .values({ roleId, permissionId })
-      .returning();
+    const id = crypto.randomUUID();
+    await db.insert(rolePermissions).values({ id, roleId, permissionId });
+    
+    const result = await db.select().from(rolePermissions).where(eq(rolePermissions.id, id)).limit(1);
+    const created = result?.[0];
+    if (!created) {
+      throw new Error("Failed to assign permission to role");
+    }
     return created;
   }
 
@@ -491,16 +509,33 @@ class DatabaseStorage implements IStorage {
 
   // Suppliers
   async getSuppliers(): Promise<Supplier[]> {
-    return db.select().from(suppliers).orderBy(asc(suppliers.name));
+    try {
+      const result = await db.select().from(suppliers).orderBy(asc(suppliers.name));
+      return result || [];
+    } catch (error) {
+      console.log("Error getting suppliers:", error);
+      return [];
+    }
   }
 
   async getSupplierById(id: string): Promise<Supplier | undefined> {
-    const [supplier] = await db.select().from(suppliers).where(eq(suppliers.id, id)).limit(1);
-    return supplier;
+    try {
+      const result = await db.select().from(suppliers).where(eq(suppliers.id, id)).limit(1);
+      return result?.[0];
+    } catch (error) {
+      console.log(`Error getting supplier ${id}:`, error);
+      return undefined;
+    }
   }
 
   async createSupplier(supplier: InsertSupplier): Promise<Supplier> {
-    const [created] = await db.insert(suppliers).values(supplier).returning();
+    const id = crypto.randomUUID();
+    await db.insert(suppliers).values({ ...supplier, id });
+    
+    const created = await this.getSupplierById(id);
+    if (!created) {
+      throw new Error("Failed to create supplier");
+    }
     return created;
   }
 
@@ -519,32 +554,52 @@ class DatabaseStorage implements IStorage {
 
   // Products
   async getProducts(): Promise<ProductWithVariants[]> {
-    const prods = await db.select().from(products).orderBy(asc(products.name));
-    const result: ProductWithVariants[] = [];
-    
-    for (const prod of prods) {
-      const variants = await db.select()
-        .from(productVariants)
-        .where(eq(productVariants.productId, prod.id));
-      result.push({ ...prod, variants });
+    try {
+      const prods = await db.select().from(products).orderBy(asc(products.name));
+      if (!prods || prods.length === 0) return [];
+      
+      const result: ProductWithVariants[] = [];
+      
+      for (const prod of prods) {
+        const variants = await db.select()
+          .from(productVariants)
+          .where(eq(productVariants.productId, prod.id));
+        result.push({ ...prod, variants: variants || [] });
+      }
+      
+      return result;
+    } catch (error) {
+      console.log("Error getting products:", error);
+      return [];
     }
-    
-    return result;
   }
 
   async getProductById(id: string): Promise<ProductWithVariants | undefined> {
-    const [prod] = await db.select().from(products).where(eq(products.id, id)).limit(1);
-    if (!prod) return undefined;
+    try {
+      const result = await db.select().from(products).where(eq(products.id, id)).limit(1);
+      const prod = result?.[0];
+      if (!prod) return undefined;
 
-    const variants = await db.select()
-      .from(productVariants)
-      .where(eq(productVariants.productId, id));
-    
-    return { ...prod, variants };
+      const variants = await db.select()
+        .from(productVariants)
+        .where(eq(productVariants.productId, id));
+      
+      return { ...prod, variants: variants || [] };
+    } catch (error) {
+      console.log(`Error getting product ${id}:`, error);
+      return undefined;
+    }
   }
 
   async createProduct(product: InsertProduct): Promise<Product> {
-    const [created] = await db.insert(products).values(product).returning();
+    const id = crypto.randomUUID();
+    await db.insert(products).values({ ...product, id });
+    
+    const result = await db.select().from(products).where(eq(products.id, id)).limit(1);
+    const created = result?.[0];
+    if (!created) {
+      throw new Error("Failed to create product");
+    }
     return created;
   }
 
@@ -563,21 +618,43 @@ class DatabaseStorage implements IStorage {
 
   // Product Variants
   async getProductVariants(productId: string): Promise<ProductVariant[]> {
-    return db.select().from(productVariants).where(eq(productVariants.productId, productId));
+    try {
+      const result = await db.select().from(productVariants).where(eq(productVariants.productId, productId));
+      return result || [];
+    } catch (error) {
+      console.log(`Error getting product variants for ${productId}:`, error);
+      return [];
+    }
   }
 
   async getProductVariantById(id: string): Promise<ProductVariant | undefined> {
-    const [variant] = await db.select().from(productVariants).where(eq(productVariants.id, id)).limit(1);
-    return variant;
+    try {
+      const result = await db.select().from(productVariants).where(eq(productVariants.id, id)).limit(1);
+      return result?.[0];
+    } catch (error) {
+      console.log(`Error getting product variant ${id}:`, error);
+      return undefined;
+    }
   }
 
   async getProductVariantBySku(sku: string): Promise<ProductVariant | undefined> {
-    const [variant] = await db.select().from(productVariants).where(eq(productVariants.sku, sku)).limit(1);
-    return variant;
+    try {
+      const result = await db.select().from(productVariants).where(eq(productVariants.sku, sku)).limit(1);
+      return result?.[0];
+    } catch (error) {
+      console.log(`Error getting product variant by SKU ${sku}:`, error);
+      return undefined;
+    }
   }
 
   async createProductVariant(variant: InsertProductVariant): Promise<ProductVariant> {
-    const [created] = await db.insert(productVariants).values(variant).returning();
+    const id = crypto.randomUUID();
+    await db.insert(productVariants).values({ ...variant, id });
+    
+    const created = await this.getProductVariantById(id);
+    if (!created) {
+      throw new Error("Failed to create product variant");
+    }
     return created;
   }
 
@@ -612,21 +689,43 @@ class DatabaseStorage implements IStorage {
 
   // Courier Partners
   async getCourierPartners(): Promise<CourierPartner[]> {
-    return db.select().from(courierPartners).orderBy(asc(courierPartners.name));
+    try {
+      const result = await db.select().from(courierPartners).orderBy(asc(courierPartners.name));
+      return result || [];
+    } catch (error) {
+      console.log("Error getting courier partners:", error);
+      return [];
+    }
   }
 
   async getCourierPartnerById(id: string): Promise<CourierPartner | undefined> {
-    const [courier] = await db.select().from(courierPartners).where(eq(courierPartners.id, id)).limit(1);
-    return courier;
+    try {
+      const result = await db.select().from(courierPartners).where(eq(courierPartners.id, id)).limit(1);
+      return result?.[0];
+    } catch (error) {
+      console.log(`Error getting courier partner ${id}:`, error);
+      return undefined;
+    }
   }
 
   async getCourierPartnerByCode(code: string): Promise<CourierPartner | undefined> {
-    const [courier] = await db.select().from(courierPartners).where(eq(courierPartners.code, code)).limit(1);
-    return courier;
+    try {
+      const result = await db.select().from(courierPartners).where(eq(courierPartners.code, code)).limit(1);
+      return result?.[0];
+    } catch (error) {
+      console.log(`Error getting courier partner by code ${code}:`, error);
+      return undefined;
+    }
   }
 
   async createCourierPartner(courier: InsertCourierPartner): Promise<CourierPartner> {
-    const [created] = await db.insert(courierPartners).values(courier).returning();
+    const id = crypto.randomUUID();
+    await db.insert(courierPartners).values({ ...courier, id });
+    
+    const created = await this.getCourierPartnerById(id);
+    if (!created) {
+      throw new Error("Failed to create courier partner");
+    }
     return created;
   }
 
@@ -645,55 +744,60 @@ class DatabaseStorage implements IStorage {
 
   // Orders
   async getOrders(filters?: OrderFilters): Promise<OrderWithItems[]> {
-    let query = db.select().from(orders);
-    
-    const conditions = [];
-    if (filters?.status) {
-      conditions.push(eq(orders.status, filters.status));
-    }
-    if (filters?.paymentStatus) {
-      conditions.push(eq(orders.paymentStatus, filters.paymentStatus));
-    }
-    if (filters?.courierType) {
-      conditions.push(eq(orders.courierType, filters.courierType));
-    }
-    if (filters?.fromDate) {
-      conditions.push(gte(orders.createdAt, filters.fromDate));
-    }
-    if (filters?.toDate) {
-      conditions.push(lte(orders.createdAt, filters.toDate));
-    }
-    if (filters?.search) {
-      conditions.push(or(
-        like(orders.orderNumber, `%${filters.search}%`),
-        like(orders.customerName, `%${filters.search}%`),
-        like(orders.customerPhone, `%${filters.search}%`)
-      ));
-    }
+    try {
+      const conditions = [];
+      if (filters?.status) {
+        conditions.push(eq(orders.status, filters.status));
+      }
+      if (filters?.paymentStatus) {
+        conditions.push(eq(orders.paymentStatus, filters.paymentStatus));
+      }
+      if (filters?.courierType) {
+        conditions.push(eq(orders.courierType, filters.courierType));
+      }
+      if (filters?.fromDate) {
+        conditions.push(gte(orders.createdAt, filters.fromDate));
+      }
+      if (filters?.toDate) {
+        conditions.push(lte(orders.createdAt, filters.toDate));
+      }
+      if (filters?.search) {
+        conditions.push(or(
+          like(orders.orderNumber, `%${filters.search}%`),
+          like(orders.customerName, `%${filters.search}%`),
+          like(orders.customerPhone, `%${filters.search}%`)
+        ));
+      }
 
-    const ordersResult = conditions.length > 0
-      ? await db.select().from(orders).where(and(...conditions)).orderBy(desc(orders.createdAt))
-      : await db.select().from(orders).orderBy(desc(orders.createdAt));
+      const ordersResult = conditions.length > 0
+        ? await db.select().from(orders).where(and(...conditions)).orderBy(desc(orders.createdAt))
+        : await db.select().from(orders).orderBy(desc(orders.createdAt));
 
-    const result: OrderWithItems[] = [];
-    for (const ord of ordersResult) {
-      const items = await db.select().from(orderItems).where(eq(orderItems.orderId, ord.id));
-      const courierPartner = ord.courierPartnerId 
-        ? await this.getCourierPartnerById(ord.courierPartnerId) 
-        : null;
-      const assignedUser = ord.assignedTo
-        ? await db.select().from(users).where(eq(users.id, ord.assignedTo)).then(r => r[0])
-        : null;
+      if (!ordersResult || ordersResult.length === 0) return [];
+
+      const result: OrderWithItems[] = [];
+      for (const ord of ordersResult) {
+        const items = await db.select().from(orderItems).where(eq(orderItems.orderId, ord.id));
+        const courierPartner = ord.courierPartnerId 
+          ? await this.getCourierPartnerById(ord.courierPartnerId) 
+          : null;
+        const assignedUser = ord.assignedTo
+          ? await db.select().from(users).where(eq(users.id, ord.assignedTo)).then(r => r?.[0])
+          : null;
+        
+        result.push({ 
+          ...ord, 
+          items: items || [], 
+          courierPartner,
+          assignedUser
+        });
+      }
       
-      result.push({ 
-        ...ord, 
-        items, 
-        courierPartner,
-        assignedUser
-      });
+      return result;
+    } catch (error) {
+      console.log("Error getting orders:", error);
+      return [];
     }
-    
-    return result;
   }
 
   async getOrderById(id: string): Promise<OrderWithItems | undefined> {
@@ -719,17 +823,27 @@ class DatabaseStorage implements IStorage {
   }
 
   async createOrder(order: InsertOrder, items: InsertOrderItem[]): Promise<OrderWithItems> {
-    const [created] = await db.insert(orders).values(order).returning();
+    const orderId = crypto.randomUUID();
+    await db.insert(orders).values({ ...order, id: orderId });
+    
+    const orderResult = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
+    const created = orderResult?.[0];
+    if (!created) {
+      throw new Error("Failed to create order");
+    }
     
     const createdItems: OrderItem[] = [];
     for (const item of items) {
-      const [createdItem] = await db.insert(orderItems)
-        .values({ ...item, orderId: created.id })
-        .returning();
-      createdItems.push(createdItem);
+      const itemId = crypto.randomUUID();
+      await db.insert(orderItems).values({ ...item, id: itemId, orderId: created.id });
+      const itemResult = await db.select().from(orderItems).where(eq(orderItems.id, itemId)).limit(1);
+      if (itemResult?.[0]) {
+        createdItems.push(itemResult[0]);
+      }
     }
 
     await db.insert(orderStatusHistory).values({
+      id: crypto.randomUUID(),
       orderId: created.id,
       status: created.status,
       comment: "Order created",
@@ -779,72 +893,93 @@ class DatabaseStorage implements IStorage {
 
   // Stock Movements
   async getStockMovements(filters?: StockMovementFilters): Promise<StockMovement[]> {
-    const conditions = [];
-    if (filters?.type) {
-      conditions.push(eq(stockMovements.type, filters.type));
-    }
-    if (filters?.variantId) {
-      conditions.push(eq(stockMovements.productVariantId, filters.variantId));
-    }
-    if (filters?.supplierId) {
-      conditions.push(eq(stockMovements.supplierId, filters.supplierId));
-    }
-    if (filters?.fromDate) {
-      conditions.push(gte(stockMovements.createdAt, filters.fromDate));
-    }
-    if (filters?.toDate) {
-      conditions.push(lte(stockMovements.createdAt, filters.toDate));
-    }
+    try {
+      const conditions = [];
+      if (filters?.type) {
+        conditions.push(eq(stockMovements.type, filters.type));
+      }
+      if (filters?.variantId) {
+        conditions.push(eq(stockMovements.productVariantId, filters.variantId));
+      }
+      if (filters?.supplierId) {
+        conditions.push(eq(stockMovements.supplierId, filters.supplierId));
+      }
+      if (filters?.fromDate) {
+        conditions.push(gte(stockMovements.createdAt, filters.fromDate));
+      }
+      if (filters?.toDate) {
+        conditions.push(lte(stockMovements.createdAt, filters.toDate));
+      }
 
-    return conditions.length > 0
-      ? db.select().from(stockMovements).where(and(...conditions)).orderBy(desc(stockMovements.createdAt))
-      : db.select().from(stockMovements).orderBy(desc(stockMovements.createdAt));
+      const result = conditions.length > 0
+        ? await db.select().from(stockMovements).where(and(...conditions)).orderBy(desc(stockMovements.createdAt))
+        : await db.select().from(stockMovements).orderBy(desc(stockMovements.createdAt));
+      
+      return result || [];
+    } catch (error) {
+      console.log("Error getting stock movements:", error);
+      return [];
+    }
   }
 
   async createStockMovement(movement: InsertStockMovement): Promise<StockMovement> {
-    const [created] = await db.insert(stockMovements).values(movement).returning();
+    const id = crypto.randomUUID();
+    await db.insert(stockMovements).values({ ...movement, id });
+    
+    const result = await db.select().from(stockMovements).where(eq(stockMovements.id, id)).limit(1);
+    const created = result?.[0];
+    if (!created) {
+      throw new Error("Failed to create stock movement");
+    }
     return created;
   }
 
   // Complaints
   async getComplaints(filters?: ComplaintFilters): Promise<ComplaintWithTimeline[]> {
-    const conditions = [];
-    if (filters?.status) {
-      conditions.push(eq(complaints.status, filters.status));
-    }
-    if (filters?.reason) {
-      conditions.push(eq(complaints.reason, filters.reason));
-    }
-    if (filters?.assignedTo) {
-      conditions.push(eq(complaints.assignedTo, filters.assignedTo));
-    }
-    if (filters?.fromDate) {
-      conditions.push(gte(complaints.createdAt, filters.fromDate));
-    }
-    if (filters?.toDate) {
-      conditions.push(lte(complaints.createdAt, filters.toDate));
-    }
+    try {
+      const conditions = [];
+      if (filters?.status) {
+        conditions.push(eq(complaints.status, filters.status));
+      }
+      if (filters?.reason) {
+        conditions.push(eq(complaints.reason, filters.reason));
+      }
+      if (filters?.assignedTo) {
+        conditions.push(eq(complaints.assignedTo, filters.assignedTo));
+      }
+      if (filters?.fromDate) {
+        conditions.push(gte(complaints.createdAt, filters.fromDate));
+      }
+      if (filters?.toDate) {
+        conditions.push(lte(complaints.createdAt, filters.toDate));
+      }
 
-    const complaintsResult = conditions.length > 0
-      ? await db.select().from(complaints).where(and(...conditions)).orderBy(desc(complaints.createdAt))
-      : await db.select().from(complaints).orderBy(desc(complaints.createdAt));
+      const complaintsResult = conditions.length > 0
+        ? await db.select().from(complaints).where(and(...conditions)).orderBy(desc(complaints.createdAt))
+        : await db.select().from(complaints).orderBy(desc(complaints.createdAt));
 
-    const result: ComplaintWithTimeline[] = [];
-    for (const comp of complaintsResult) {
-      const timeline = await db.select()
-        .from(complaintTimeline)
-        .where(eq(complaintTimeline.complaintId, comp.id))
-        .orderBy(asc(complaintTimeline.createdAt));
+      if (!complaintsResult || complaintsResult.length === 0) return [];
+
+      const result: ComplaintWithTimeline[] = [];
+      for (const comp of complaintsResult) {
+        const timeline = await db.select()
+          .from(complaintTimeline)
+          .where(eq(complaintTimeline.complaintId, comp.id))
+          .orderBy(asc(complaintTimeline.createdAt));
+        
+        const order = await this.getOrderById(comp.orderId);
+        const assignedUser = comp.assignedTo
+          ? await db.select().from(users).where(eq(users.id, comp.assignedTo)).then(r => r?.[0])
+          : null;
+        
+        result.push({ ...comp, timeline: timeline || [], order, assignedUser });
+      }
       
-      const order = await this.getOrderById(comp.orderId);
-      const assignedUser = comp.assignedTo
-        ? await db.select().from(users).where(eq(users.id, comp.assignedTo)).then(r => r[0])
-        : null;
-      
-      result.push({ ...comp, timeline, order, assignedUser });
+      return result;
+    } catch (error) {
+      console.log("Error getting complaints:", error);
+      return [];
     }
-    
-    return result;
   }
 
   async getComplaintById(id: string): Promise<ComplaintWithTimeline | undefined> {
@@ -871,7 +1006,14 @@ class DatabaseStorage implements IStorage {
   }
 
   async createComplaint(complaint: InsertComplaint): Promise<Complaint> {
-    const [created] = await db.insert(complaints).values(complaint).returning();
+    const id = crypto.randomUUID();
+    await db.insert(complaints).values({ ...complaint, id });
+    
+    const result = await db.select().from(complaints).where(eq(complaints.id, id)).limit(1);
+    const created = result?.[0];
+    if (!created) {
+      throw new Error("Failed to create complaint");
+    }
     return created;
   }
 
@@ -889,45 +1031,60 @@ class DatabaseStorage implements IStorage {
   }
 
   async addComplaintTimelineEntry(entry: InsertComplaintTimeline): Promise<ComplaintTimeline> {
-    const [created] = await db.insert(complaintTimeline).values(entry).returning();
+    const id = crypto.randomUUID();
+    await db.insert(complaintTimeline).values({ ...entry, id });
+    
+    const result = await db.select().from(complaintTimeline).where(eq(complaintTimeline.id, id)).limit(1);
+    const created = result?.[0];
+    if (!created) {
+      throw new Error("Failed to create complaint timeline entry");
+    }
     return created;
   }
 
   // Internal Deliveries
   async getInternalDeliveries(filters?: DeliveryFilters): Promise<InternalDeliveryWithDetails[]> {
-    const conditions = [];
-    if (filters?.status) {
-      conditions.push(eq(internalDeliveries.status, filters.status));
-    }
-    if (filters?.assignedTo) {
-      conditions.push(eq(internalDeliveries.assignedTo, filters.assignedTo));
-    }
-    if (filters?.fromDate) {
-      conditions.push(gte(internalDeliveries.createdAt, filters.fromDate));
-    }
-    if (filters?.toDate) {
-      conditions.push(lte(internalDeliveries.createdAt, filters.toDate));
-    }
-
-    const deliveriesResult = conditions.length > 0
-      ? await db.select().from(internalDeliveries).where(and(...conditions)).orderBy(desc(internalDeliveries.createdAt))
-      : await db.select().from(internalDeliveries).orderBy(desc(internalDeliveries.createdAt));
-
-    const result: InternalDeliveryWithDetails[] = [];
-    for (const del of deliveriesResult) {
-      const order = await this.getOrderById(del.orderId);
-      const [assignedUser] = await db.select().from(users).where(eq(users.id, del.assignedTo)).limit(1);
-      const events = await db.select()
-        .from(deliveryEvents)
-        .where(eq(deliveryEvents.deliveryId, del.id))
-        .orderBy(asc(deliveryEvents.createdAt));
-      
-      if (order && assignedUser) {
-        result.push({ ...del, order, assignedUser, events });
+    try {
+      const conditions = [];
+      if (filters?.status) {
+        conditions.push(eq(internalDeliveries.status, filters.status));
       }
+      if (filters?.assignedTo) {
+        conditions.push(eq(internalDeliveries.assignedTo, filters.assignedTo));
+      }
+      if (filters?.fromDate) {
+        conditions.push(gte(internalDeliveries.createdAt, filters.fromDate));
+      }
+      if (filters?.toDate) {
+        conditions.push(lte(internalDeliveries.createdAt, filters.toDate));
+      }
+
+      const deliveriesResult = conditions.length > 0
+        ? await db.select().from(internalDeliveries).where(and(...conditions)).orderBy(desc(internalDeliveries.createdAt))
+        : await db.select().from(internalDeliveries).orderBy(desc(internalDeliveries.createdAt));
+
+      if (!deliveriesResult || deliveriesResult.length === 0) return [];
+
+      const result: InternalDeliveryWithDetails[] = [];
+      for (const del of deliveriesResult) {
+        const order = await this.getOrderById(del.orderId);
+        const userResult = await db.select().from(users).where(eq(users.id, del.assignedTo)).limit(1);
+        const assignedUser = userResult?.[0];
+        const events = await db.select()
+          .from(deliveryEvents)
+          .where(eq(deliveryEvents.deliveryId, del.id))
+          .orderBy(asc(deliveryEvents.createdAt));
+        
+        if (order && assignedUser) {
+          result.push({ ...del, order, assignedUser, events: events || [] });
+        }
+      }
+      
+      return result;
+    } catch (error) {
+      console.log("Error getting internal deliveries:", error);
+      return [];
     }
-    
-    return result;
   }
 
   async getInternalDeliveryById(id: string): Promise<InternalDeliveryWithDetails | undefined> {
@@ -947,9 +1104,17 @@ class DatabaseStorage implements IStorage {
   }
 
   async createInternalDelivery(delivery: InsertInternalDelivery): Promise<InternalDelivery> {
-    const [created] = await db.insert(internalDeliveries).values(delivery).returning();
+    const id = crypto.randomUUID();
+    await db.insert(internalDeliveries).values({ ...delivery, id });
+    
+    const result = await db.select().from(internalDeliveries).where(eq(internalDeliveries.id, id)).limit(1);
+    const created = result?.[0];
+    if (!created) {
+      throw new Error("Failed to create internal delivery");
+    }
     
     await db.insert(deliveryEvents).values({
+      id: crypto.randomUUID(),
       deliveryId: created.id,
       event: "Assigned",
       comment: "Delivery assigned to staff",
@@ -968,7 +1133,14 @@ class DatabaseStorage implements IStorage {
   }
 
   async addDeliveryEvent(event: InsertDeliveryEvent): Promise<DeliveryEvent> {
-    const [created] = await db.insert(deliveryEvents).values(event).returning();
+    const id = crypto.randomUUID();
+    await db.insert(deliveryEvents).values({ ...event, id });
+    
+    const result = await db.select().from(deliveryEvents).where(eq(deliveryEvents.id, id)).limit(1);
+    const created = result?.[0];
+    if (!created) {
+      throw new Error("Failed to create delivery event");
+    }
     return created;
   }
 
@@ -983,7 +1155,13 @@ class DatabaseStorage implements IStorage {
   }
 
   async createBulkUploadJob(job: InsertBulkUploadJob): Promise<BulkUploadJob> {
-    const [created] = await db.insert(bulkUploadJobs).values(job).returning();
+    const id = crypto.randomUUID();
+    await db.insert(bulkUploadJobs).values({ ...job, id });
+    
+    const created = await this.getBulkUploadJobById(id);
+    if (!created) {
+      throw new Error("Failed to create bulk upload job");
+    }
     return created;
   }
 
@@ -997,7 +1175,14 @@ class DatabaseStorage implements IStorage {
 
   // Audit Logs
   async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
-    const [created] = await db.insert(auditLogs).values(log).returning();
+    const id = crypto.randomUUID();
+    await db.insert(auditLogs).values({ ...log, id });
+    
+    const result = await db.select().from(auditLogs).where(eq(auditLogs.id, id)).limit(1);
+    const created = result?.[0];
+    if (!created) {
+      throw new Error("Failed to create audit log");
+    }
     return created;
   }
 
@@ -1037,16 +1222,24 @@ class DatabaseStorage implements IStorage {
   async setSetting(key: string, value: any, description?: string): Promise<Setting> {
     const existing = await this.getSetting(key);
     if (existing) {
-      const [updated] = await db.update(settings)
+      await db.update(settings)
         .set({ value, description, updatedAt: new Date() })
-        .where(eq(settings.key, key))
-        .returning();
+        .where(eq(settings.key, key));
+      
+      const updated = await this.getSetting(key);
+      if (!updated) {
+        throw new Error("Failed to update setting");
+      }
       return updated;
     }
     
-    const [created] = await db.insert(settings)
-      .values({ key, value, description })
-      .returning();
+    const id = crypto.randomUUID();
+    await db.insert(settings).values({ id, key, value, description });
+    
+    const created = await this.getSetting(key);
+    if (!created) {
+      throw new Error("Failed to create setting");
+    }
     return created;
   }
 

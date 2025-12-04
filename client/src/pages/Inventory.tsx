@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { DataTable } from "@/components/DataTable";
 import { SearchInput } from "@/components/SearchInput";
 import { ReceiveStockModal } from "@/components/ReceiveStockModal";
@@ -25,10 +26,16 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { PackagePlus, PackageMinus, History, Download, Search, AlertCircle, Package, Truck } from "lucide-react";
-import { mockProducts, mockStockMovements, mockOrders, mockComplaints, mockCouriers, type ProductVariant, type StockMovement, type Order } from "@/lib/mockData";
+import { PackagePlus, PackageMinus, History, Download, Search, AlertCircle, Package, Truck, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import type { ProductWithVariants, ProductVariant, StockMovement, Order, CourierPartner } from "@shared/schema";
+import type { ReceiveStockData } from "@/components/ReceiveStockModal";
+
+type VariantWithProduct = ProductVariant & { productName: string };
 
 export default function Inventory() {
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [receiveModalOpen, setReceiveModalOpen] = useState(false);
   const [manualDispatchOpen, setManualDispatchOpen] = useState(false);
@@ -38,9 +45,54 @@ export default function Inventory() {
   const [lookupError, setLookupError] = useState("");
   const [dispatchType, setDispatchType] = useState<"fresh" | "replacement">("fresh");
   const [selectedCourier, setSelectedCourier] = useState("");
-  const [assignedTo, setAssignedTo] = useState("");
 
-  const allVariants = mockProducts.flatMap((p) =>
+  const { data: products = [], isLoading: productsLoading } = useQuery<ProductWithVariants[]>({
+    queryKey: ["/api/products"],
+  });
+
+  const { data: stockMovements = [], isLoading: movementsLoading } = useQuery<StockMovement[]>({
+    queryKey: ["/api/stock-movements"],
+  });
+
+  const { data: couriers = [] } = useQuery<CourierPartner[]>({
+    queryKey: ["/api/couriers"],
+  });
+
+  const receiveStockMutation = useMutation({
+    mutationFn: async (data: ReceiveStockData) => {
+      const movements = [];
+      for (const product of data.products) {
+        for (const [variantId, quantity] of Object.entries(product.quantities)) {
+          if (quantity > 0) {
+            movements.push({
+              productVariantId: variantId,
+              type: "inward" as const,
+              quantity,
+              supplierId: data.supplierId,
+              costPrice: product.costPrice,
+              invoiceNumber: data.invoiceNumber,
+              invoiceDate: data.invoiceDate ? new Date(data.invoiceDate).toISOString() : undefined,
+              reason: "Stock received from supplier",
+            });
+          }
+        }
+      }
+      for (const movement of movements) {
+        await apiRequest("POST", "/api/stock-movements", movement);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stock-movements"] });
+      toast({ title: "Stock received successfully" });
+      setReceiveModalOpen(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to receive stock", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const allVariants: VariantWithProduct[] = products.flatMap((p) =>
     p.variants.map((v) => ({ ...v, productName: p.name }))
   );
 
@@ -48,12 +100,13 @@ export default function Inventory() {
     (v) =>
       v.sku.toLowerCase().includes(searchQuery.toLowerCase()) ||
       v.productName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      v.color.toLowerCase().includes(searchQuery.toLowerCase())
+      (v.color && v.color.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const getStockStatus = (qty: number) => {
+  const getStockStatus = (qty: number, threshold?: number | null) => {
+    const lowThreshold = threshold || 10;
     if (qty === 0) return { label: "Out of Stock", variant: "destructive" as const };
-    if (qty < 20) return { label: "Low Stock", variant: "secondary" as const };
+    if (qty <= lowThreshold) return { label: "Low Stock", variant: "secondary" as const };
     return { label: "In Stock", variant: "default" as const };
   };
 
@@ -63,26 +116,32 @@ export default function Inventory() {
     {
       key: "color",
       header: "Color",
-      render: (v: ProductVariant & { productName: string }) => (
+      render: (v: VariantWithProduct) => (
         <div className="flex items-center gap-2">
-          <div
-            className="w-4 h-4 rounded-full border"
-            style={{
-              backgroundColor:
-                v.color.toLowerCase() === "white" ? "#f8f8f8" : v.color.toLowerCase(),
-            }}
-          />
-          {v.color}
+          {v.color && (
+            <div
+              className="w-4 h-4 rounded-full border"
+              style={{
+                backgroundColor:
+                  v.color.toLowerCase() === "white" ? "#f8f8f8" : v.color.toLowerCase(),
+              }}
+            />
+          )}
+          {v.color || "-"}
         </div>
       ),
     },
-    { key: "size", header: "Size" },
+    { 
+      key: "size", 
+      header: "Size",
+      render: (v: VariantWithProduct) => v.size || "-",
+    },
     {
       key: "stockQuantity",
       header: "Stock",
       sortable: true,
-      render: (v: ProductVariant & { productName: string }) => {
-        const status = getStockStatus(v.stockQuantity);
+      render: (v: VariantWithProduct) => {
+        const status = getStockStatus(v.stockQuantity, v.lowStockThreshold);
         return (
           <div className="flex items-center gap-2">
             <span className="font-semibold">{v.stockQuantity}</span>
@@ -96,18 +155,18 @@ export default function Inventory() {
     {
       key: "costPrice",
       header: "Cost",
-      render: (v: ProductVariant & { productName: string }) => `₹${v.costPrice}`,
+      render: (v: VariantWithProduct) => `₹${parseFloat(v.costPrice)}`,
     },
     {
       key: "sellingPrice",
       header: "Price",
-      render: (v: ProductVariant & { productName: string }) => `₹${v.sellingPrice}`,
+      render: (v: VariantWithProduct) => `₹${parseFloat(v.sellingPrice)}`,
     },
     {
       key: "value",
       header: "Stock Value",
-      render: (v: ProductVariant & { productName: string }) =>
-        `₹${(v.stockQuantity * v.costPrice).toLocaleString()}`,
+      render: (v: VariantWithProduct) =>
+        `₹${(v.stockQuantity * parseFloat(v.costPrice)).toLocaleString()}`,
     },
   ];
 
@@ -116,19 +175,33 @@ export default function Inventory() {
       key: "type",
       header: "Type",
       render: (m: StockMovement) => (
-        <Badge variant={m.type === "inward" ? "default" : "secondary"}>
-          {m.type === "inward" ? "IN" : "OUT"}
+        <Badge variant={m.type === "inward" ? "default" : m.type === "outward" ? "secondary" : "outline"}>
+          {m.type === "inward" ? "IN" : m.type === "outward" ? "OUT" : "ADJ"}
         </Badge>
       ),
     },
-    { key: "sku", header: "SKU" },
-    { key: "productName", header: "Product" },
+    { 
+      key: "productVariantId", 
+      header: "SKU",
+      render: (m: StockMovement) => {
+        const variant = allVariants.find(v => v.id === m.productVariantId);
+        return <span className="font-mono text-sm">{variant?.sku || m.productVariantId}</span>;
+      },
+    },
+    { 
+      key: "productName", 
+      header: "Product",
+      render: (m: StockMovement) => {
+        const variant = allVariants.find(v => v.id === m.productVariantId);
+        return variant?.productName || "-";
+      },
+    },
     {
       key: "quantity",
       header: "Qty",
       render: (m: StockMovement) => (
-        <span className={m.type === "inward" ? "text-green-600" : "text-red-600"}>
-          {m.type === "inward" ? "+" : "-"}{m.quantity}
+        <span className={m.type === "inward" ? "text-green-600" : m.type === "outward" ? "text-red-600" : ""}>
+          {m.type === "inward" ? "+" : m.type === "outward" ? "-" : ""}{m.quantity}
         </span>
       ),
     },
@@ -146,51 +219,46 @@ export default function Inventory() {
       key: "createdAt",
       header: "Date",
       render: (m: StockMovement) =>
-        new Date(m.createdAt).toLocaleDateString("en-IN", {
+        m.createdAt ? new Date(m.createdAt).toLocaleDateString("en-IN", {
           day: "numeric",
           month: "short",
           hour: "2-digit",
           minute: "2-digit",
-        }),
+        }) : "-",
     },
   ];
 
-  const handleOrderLookup = () => {
+  const handleOrderLookup = async () => {
     setLookupError("");
     setFoundOrder(null);
 
-    const order = mockOrders.find(
-      (o) => o.orderNumber.toLowerCase() === orderLookup.toLowerCase()
-    );
-
-    if (!order) {
-      setLookupError("Order not found");
+    if (!orderLookup.trim()) {
+      setLookupError("Please enter an order number");
       return;
     }
 
-    if (dispatchType === "fresh" && order.status !== "pending") {
-      const hasReplacementComplaint = mockComplaints.some(
-        (c) => c.orderId === order.id && c.resolution === "replacement"
-      );
+    try {
+      const response = await fetch(`/api/orders?orderNumber=${encodeURIComponent(orderLookup)}`);
+      if (!response.ok) {
+        setLookupError("Order not found");
+        return;
+      }
+      const orders = await response.json();
+      if (orders.length === 0) {
+        setLookupError("Order not found");
+        return;
+      }
+      const order = orders[0];
 
-      if (!hasReplacementComplaint) {
+      if (dispatchType === "fresh" && order.status !== "pending") {
         setLookupError("This order is already dispatched. Select 'Replacement' if there's a replacement complaint.");
         return;
       }
+
+      setFoundOrder(order);
+    } catch (error) {
+      setLookupError("Failed to look up order");
     }
-
-    if (dispatchType === "replacement") {
-      const hasReplacementComplaint = mockComplaints.some(
-        (c) => c.orderId === order.id && c.resolution === "replacement"
-      );
-
-      if (!hasReplacementComplaint) {
-        setLookupError("No replacement complaint found for this order.");
-        return;
-      }
-    }
-
-    setFoundOrder(order);
   };
 
   const handleManualDispatch = () => {
@@ -199,8 +267,8 @@ export default function Inventory() {
       order: foundOrder,
       dispatchType,
       courier: selectedCourier,
-      assignedTo,
     });
+    toast({ title: "Dispatch initiated successfully" });
     setManualDispatchOpen(false);
     resetDispatchForm();
   };
@@ -211,23 +279,32 @@ export default function Inventory() {
     setLookupError("");
     setDispatchType("fresh");
     setSelectedCourier("");
-    setAssignedTo("");
   };
 
   const totalInventoryValue = allVariants.reduce(
-    (sum, v) => sum + v.stockQuantity * v.costPrice,
+    (sum, v) => sum + v.stockQuantity * parseFloat(v.costPrice),
     0
   );
   const totalUnits = allVariants.reduce((sum, v) => sum + v.stockQuantity, 0);
-  const lowStockCount = allVariants.filter((v) => v.stockQuantity < 20).length;
+  const lowStockCount = allVariants.filter((v) => v.stockQuantity <= (v.lowStockThreshold || 10)).length;
 
-  const inHouseCouriers = mockCouriers.filter((c) => c.type === "in_house");
+  const inHouseCouriers = couriers.filter((c) => c.type === "in_house");
+
+  const isLoading = productsLoading || movementsLoading;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Inventory</h1>
+          <h1 className="text-2xl font-bold" data-testid="text-page-title">Inventory</h1>
           <p className="text-muted-foreground">Track stock levels and movements</p>
         </div>
         <div className="flex gap-2">
@@ -250,25 +327,25 @@ export default function Inventory() {
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Total Units</p>
-            <p className="text-2xl font-bold">{totalUnits.toLocaleString()}</p>
+            <p className="text-2xl font-bold" data-testid="text-total-units">{totalUnits.toLocaleString()}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Total SKUs</p>
-            <p className="text-2xl font-bold">{allVariants.length}</p>
+            <p className="text-2xl font-bold" data-testid="text-total-skus">{allVariants.length}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Inventory Value</p>
-            <p className="text-2xl font-bold">₹{totalInventoryValue.toLocaleString()}</p>
+            <p className="text-2xl font-bold" data-testid="text-inventory-value">₹{totalInventoryValue.toLocaleString()}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Low Stock Alerts</p>
-            <p className="text-2xl font-bold text-orange-600">{lowStockCount}</p>
+            <p className="text-2xl font-bold text-orange-600" data-testid="text-low-stock">{lowStockCount}</p>
           </CardContent>
         </Card>
       </div>
@@ -310,7 +387,7 @@ export default function Inventory() {
             </CardHeader>
             <CardContent className="p-0">
               <DataTable
-                data={mockStockMovements}
+                data={stockMovements}
                 columns={movementColumns}
                 getRowId={(m) => m.id}
                 emptyMessage="No stock movements recorded"
@@ -324,8 +401,7 @@ export default function Inventory() {
         open={receiveModalOpen}
         onOpenChange={setReceiveModalOpen}
         onReceive={(data) => {
-          console.log("Stock received:", data);
-          setReceiveModalOpen(false);
+          receiveStockMutation.mutate(data);
         }}
       />
 
@@ -399,26 +475,6 @@ export default function Inventory() {
                   </div>
                 </div>
 
-                <div>
-                  <Label className="text-sm font-medium mb-2 block">Order Items</Label>
-                  <div className="space-y-2">
-                    {foundOrder.items.map((item, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-2 border rounded-md">
-                        <div className="flex items-center gap-2">
-                          <Package className="h-4 w-4 text-muted-foreground" />
-                          <div>
-                            <p className="text-sm font-medium">{item.productName}</p>
-                            <p className="text-xs text-muted-foreground font-mono">
-                              {item.sku} | {item.color} | {item.size}
-                            </p>
-                          </div>
-                        </div>
-                        <Badge>Qty: {item.quantity}</Badge>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
                 <div className="space-y-2">
                   <Label>Assign to Employee</Label>
                   <Select value={selectedCourier} onValueChange={setSelectedCourier}>
@@ -426,11 +482,15 @@ export default function Inventory() {
                       <SelectValue placeholder="Select internal courier" />
                     </SelectTrigger>
                     <SelectContent>
-                      {inHouseCouriers.map((courier) => (
-                        <SelectItem key={courier.id} value={courier.id}>
-                          {courier.contactPerson} ({courier.name})
-                        </SelectItem>
-                      ))}
+                      {inHouseCouriers.length === 0 ? (
+                        <SelectItem value="none" disabled>No in-house couriers available</SelectItem>
+                      ) : (
+                        inHouseCouriers.map((courier) => (
+                          <SelectItem key={courier.id} value={courier.id}>
+                            {courier.name}
+                          </SelectItem>
+                        ))
+                      )}
                     </SelectContent>
                   </Select>
                 </div>

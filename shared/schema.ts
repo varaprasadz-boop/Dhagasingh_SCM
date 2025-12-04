@@ -109,9 +109,12 @@ export const courierPartners = pgTable("courier_partners", {
   name: text("name").notNull(),
   code: text("code").notNull().unique(), // e.g., "delhivery", "bluedart"
   type: courierTypeEnum("type").notNull(),
+  contactPerson: text("contact_person"),
+  phone: text("phone"),
   apiKey: text("api_key"),
   apiSecret: text("api_secret"),
   baseUrl: text("base_url"),
+  apiEnabled: boolean("api_enabled").default(false).notNull(),
   isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
