@@ -56,13 +56,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await fetch("/api/auth/me", { credentials: "include" });
       if (response.ok) {
         const data = await response.json();
-        setUser(data.user);
+        const user = data.user;
+        setUser(user);
         
-        const permResponse = await fetch("/api/auth/permissions", { credentials: "include" });
-        if (permResponse.ok) {
-          const permData = await permResponse.json();
-          setPermissions(permData.permissions);
-          setIsSuperAdmin(permData.isSuperAdmin);
+        // Extract permissions directly from the user response
+        setIsSuperAdmin(user.isSuperAdmin || false);
+        
+        if (user.isSuperAdmin) {
+          setPermissions([]);
+        } else if (user.role?.rolePermissions) {
+          const perms = user.role.rolePermissions.map(
+            (rp: { permission: { code: string } }) => rp.permission.code
+          );
+          setPermissions(perms);
+        } else {
+          setPermissions([]);
         }
       } else {
         setUser(null);
@@ -97,13 +105,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: data.error || "Login failed" };
       }
 
-      setUser(data.user);
+      const user = data.user;
+      setUser(user);
       
-      const permResponse = await fetch("/api/auth/permissions", { credentials: "include" });
-      if (permResponse.ok) {
-        const permData = await permResponse.json();
-        setPermissions(permData.permissions);
-        setIsSuperAdmin(permData.isSuperAdmin);
+      // Extract permissions directly from the login response
+      // The login response includes isSuperAdmin and role with rolePermissions
+      setIsSuperAdmin(user.isSuperAdmin || false);
+      
+      if (user.isSuperAdmin) {
+        // Super admin has all permissions - we'll handle this in hasPermission
+        setPermissions([]);
+      } else if (user.role?.rolePermissions) {
+        // Extract permission codes from role
+        const perms = user.role.rolePermissions.map(
+          (rp: { permission: { code: string } }) => rp.permission.code
+        );
+        setPermissions(perms);
+      } else {
+        setPermissions([]);
       }
 
       return { success: true };
