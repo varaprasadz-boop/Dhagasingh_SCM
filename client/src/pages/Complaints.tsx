@@ -68,6 +68,7 @@ export default function Complaints() {
   const [newTicket, setNewTicket] = useState({
     orderId: "",
     reason: "",
+    customReason: "",
     description: "",
   });
 
@@ -86,7 +87,7 @@ export default function Complaints() {
       queryClient.invalidateQueries({ queryKey: ["/api/complaints"] });
       toast({ title: "Ticket created successfully" });
       setCreateDialogOpen(false);
-      setNewTicket({ orderId: "", reason: "", description: "" });
+      setNewTicket({ orderId: "", reason: "", customReason: "", description: "" });
     },
     onError: (error: Error) => {
       toast({ title: "Failed to create ticket", description: error.message, variant: "destructive" });
@@ -225,11 +226,18 @@ export default function Complaints() {
 
   const handleCreateTicket = () => {
     if (!newTicket.orderId || !newTicket.reason) return;
+    if (newTicket.reason === "other" && !newTicket.customReason.trim()) return;
+
+    // For "other" reason, append the custom reason to description
+    let description = newTicket.description;
+    if (newTicket.reason === "other" && newTicket.customReason.trim()) {
+      description = `[Reason: ${newTicket.customReason.trim()}]${description ? '\n' + description : ''}`;
+    }
 
     createComplaintMutation.mutate({
       orderId: newTicket.orderId,
       reason: newTicket.reason,
-      description: newTicket.description,
+      description,
     });
   };
 
@@ -530,7 +538,7 @@ export default function Complaints() {
               <Label>Reason</Label>
               <Select
                 value={newTicket.reason}
-                onValueChange={(v) => setNewTicket((prev) => ({ ...prev, reason: v }))}
+                onValueChange={(v) => setNewTicket((prev) => ({ ...prev, reason: v, customReason: "" }))}
               >
                 <SelectTrigger data-testid="select-ticket-reason">
                   <SelectValue placeholder="Select reason" />
@@ -545,6 +553,17 @@ export default function Complaints() {
                 </SelectContent>
               </Select>
             </div>
+            {newTicket.reason === "other" && (
+              <div className="space-y-2">
+                <Label>Specify Reason</Label>
+                <Input
+                  value={newTicket.customReason}
+                  onChange={(e) => setNewTicket((prev) => ({ ...prev, customReason: e.target.value }))}
+                  placeholder="Enter the specific reason..."
+                  data-testid="input-custom-reason"
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Description</Label>
               <Textarea
@@ -561,7 +580,7 @@ export default function Complaints() {
             </Button>
             <Button
               onClick={handleCreateTicket}
-              disabled={!newTicket.orderId || !newTicket.reason || createComplaintMutation.isPending}
+              disabled={!newTicket.orderId || !newTicket.reason || (newTicket.reason === "other" && !newTicket.customReason.trim()) || createComplaintMutation.isPending}
               data-testid="button-submit-ticket"
             >
               {createComplaintMutation.isPending ? (

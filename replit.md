@@ -10,8 +10,10 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
-**December 2024 - Bulk Import from Shopify CSV**
-- Added ProductImportModal and OrderImportModal for bulk imports from Shopify CSV exports
+**December 2024 - Bulk Import with CSV and Excel Support**
+- Added ProductImportModal and OrderImportModal for bulk imports from Shopify exports
+- **Now supports both CSV and Excel (.xlsx, .xls) formats** without requiring file conversion
+- Excel parsing via SheetJS (xlsx library) - converts Excel to CSV internally for server processing
 - Products import (POST /api/products/import): Groups rows by Handle, creates products with variants, validates duplicate SKUs
 - Orders import (POST /api/orders/import): Groups rows by Order Name, creates orders with line items
 - Import modals feature: drag-drop file upload, data preview, validation errors, progress indication, import summary
@@ -19,7 +21,13 @@ Preferred communication style: Simple, everyday language.
   - Products: Handle, Title, Type, Vendor, Body (HTML), Option1/2/3 Name & Value, Variant SKU, Variant Price, Cost per item, Variant Inventory Qty
   - Orders: Name, Email, Total, Financial Status, Fulfillment Status, Shipping fields, Lineitem fields
 - Duplicate SKU validation checks both within batch and against existing database records
-- CSV parsing utility at client/src/lib/shopifyImport.ts handles Shopify format parsing
+- File parsing utilities at client/src/lib/shopifyImport.ts: parseCSV() handles both formats, fileToCSVString() for conversion
+
+**December 2024 - Custom Complaint Reason Input**
+- Added "Other" option in complaint reason dropdown with dynamic text input field
+- When "Other" is selected, a text input appears for custom reason specification
+- Custom reasons are prepended to the description field as "[Reason: custom text]" to preserve enum validation
+- Validation ensures custom reason is provided when "Other" is selected
 
 **December 2024 - Enhanced Receive Stock with Per-Variant Pricing**
 - ReceiveStockModal now supports multiple products per invoice, each with multiple variants

@@ -62,14 +62,14 @@ export default function Inventory() {
     mutationFn: async (data: ReceiveStockData) => {
       const movements = [];
       for (const product of data.products) {
-        for (const [variantId, quantity] of Object.entries(product.quantities)) {
-          if (quantity > 0) {
+        for (const [variantId, variantData] of Object.entries(product.variants)) {
+          if (variantData.quantity > 0) {
             movements.push({
               productVariantId: variantId,
               type: "inward" as const,
-              quantity,
+              quantity: variantData.quantity,
               supplierId: data.supplierId,
-              costPrice: product.costPrice,
+              costPrice: variantData.costPrice,
               invoiceNumber: data.invoiceNumber,
               invoiceDate: data.invoiceDate ? new Date(data.invoiceDate).toISOString() : undefined,
               reason: "Stock received from supplier",

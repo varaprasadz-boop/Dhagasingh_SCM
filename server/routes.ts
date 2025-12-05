@@ -1567,7 +1567,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/courier/delhivery/waybill", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_ORDERS), async (req, res) => {
+  app.post("/api/courier/delhivery/waybill", authMiddleware, requirePermission(PERMISSION_CODES.DISPATCH_ORDERS), async (req, res) => {
     try {
       const { count } = req.body;
       const result = await delhiveryService.generateWaybills(count || 1);
@@ -1610,7 +1610,7 @@ export async function registerRoutes(
           shippingAddress: order.shippingAddress,
           shippingCity: order.shippingCity,
           shippingState: order.shippingState,
-          shippingPincode: order.shippingPincode,
+          shippingPincode: order.shippingZip || "",
           paymentMethod: order.paymentMethod,
           totalAmount: order.totalAmount,
           items: order.items?.map(i => ({
@@ -1683,7 +1683,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/courier/delhivery/cancel/:awb", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_ORDERS), async (req, res) => {
+  app.post("/api/courier/delhivery/cancel/:awb", authMiddleware, requirePermission(PERMISSION_CODES.DISPATCH_ORDERS), async (req, res) => {
     try {
       const result = await delhiveryService.cancelShipment(req.params.awb);
       

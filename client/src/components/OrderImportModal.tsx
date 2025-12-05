@@ -38,6 +38,8 @@ import {
   parseCSV,
   parseShopifyOrders,
   validateOrderImport,
+  fileToCSVString,
+  isExcelFile,
   type ShopifyOrderRow,
   type ParsedOrder,
 } from "@/lib/shopifyImport";
@@ -115,7 +117,7 @@ export function OrderImportModal({ open, onOpenChange }: OrderImportModalProps) 
 
     setFile(selectedFile);
 
-    const text = await selectedFile.text();
+    const text = await fileToCSVString(selectedFile);
     setCsvData(text);
 
     const { data: rows, errors: csvErrors } = await parseCSV<ShopifyOrderRow>(selectedFile);
@@ -139,8 +141,11 @@ export function OrderImportModal({ open, onOpenChange }: OrderImportModalProps) 
     e.preventDefault();
     setIsDragging(false);
     const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && droppedFile.name.endsWith(".csv")) {
-      handleFile(droppedFile);
+    if (droppedFile) {
+      const name = droppedFile.name.toLowerCase();
+      if (name.endsWith(".csv") || name.endsWith(".xlsx") || name.endsWith(".xls")) {
+        handleFile(droppedFile);
+      }
     }
   };
 
@@ -172,10 +177,10 @@ export function OrderImportModal({ open, onOpenChange }: OrderImportModalProps) 
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShoppingCart className="h-5 w-5" />
-            Import Orders from Shopify CSV
+            Import Orders from Shopify
           </DialogTitle>
           <DialogDescription>
-            Upload a Shopify orders export CSV file to bulk import orders with line items.
+            Upload a Shopify orders export (CSV or Excel) to bulk import orders with line items.
           </DialogDescription>
         </DialogHeader>
 
@@ -198,7 +203,7 @@ export function OrderImportModal({ open, onOpenChange }: OrderImportModalProps) 
                 <input
                   ref={inputRef}
                   type="file"
-                  accept=".csv"
+                  accept=".csv,.xlsx,.xls"
                   className="hidden"
                   onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
                   data-testid="input-order-csv"
@@ -206,9 +211,9 @@ export function OrderImportModal({ open, onOpenChange }: OrderImportModalProps) 
                 <div className="flex flex-col items-center gap-3 text-center">
                   <Upload className={`h-12 w-12 ${isDragging ? "text-primary" : "text-muted-foreground"}`} />
                   <div>
-                    <p className="font-medium text-lg">Drag and drop your Shopify Orders CSV file</p>
+                    <p className="font-medium text-lg">Drag and drop your Shopify Orders export file</p>
                     <p className="text-sm text-muted-foreground mt-1">
-                      or click to browse. Max file size: 10MB
+                      CSV or Excel (.xlsx, .xls) formats supported. Max file size: 10MB
                     </p>
                   </div>
                 </div>

@@ -38,6 +38,8 @@ import {
   parseCSV,
   parseShopifyProducts,
   validateProductImport,
+  fileToCSVString,
+  isExcelFile,
   type ShopifyProductRow,
   type ParsedProduct,
 } from "@/lib/shopifyImport";
@@ -114,7 +116,7 @@ export function ProductImportModal({ open, onOpenChange }: ProductImportModalPro
 
     setFile(selectedFile);
 
-    const text = await selectedFile.text();
+    const text = await fileToCSVString(selectedFile);
     setCsvData(text);
 
     const { data: rows, errors: csvErrors } = await parseCSV<ShopifyProductRow>(selectedFile);
@@ -138,8 +140,11 @@ export function ProductImportModal({ open, onOpenChange }: ProductImportModalPro
     e.preventDefault();
     setIsDragging(false);
     const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && droppedFile.name.endsWith(".csv")) {
-      handleFile(droppedFile);
+    if (droppedFile) {
+      const name = droppedFile.name.toLowerCase();
+      if (name.endsWith(".csv") || name.endsWith(".xlsx") || name.endsWith(".xls")) {
+        handleFile(droppedFile);
+      }
     }
   };
 
@@ -171,10 +176,10 @@ export function ProductImportModal({ open, onOpenChange }: ProductImportModalPro
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Package className="h-5 w-5" />
-            Import Products from Shopify CSV
+            Import Products from Shopify
           </DialogTitle>
           <DialogDescription>
-            Upload a Shopify product export CSV file to bulk import products with variants.
+            Upload a Shopify product export (CSV or Excel) to bulk import products with variants.
           </DialogDescription>
         </DialogHeader>
 
@@ -197,7 +202,7 @@ export function ProductImportModal({ open, onOpenChange }: ProductImportModalPro
                 <input
                   ref={inputRef}
                   type="file"
-                  accept=".csv"
+                  accept=".csv,.xlsx,.xls"
                   className="hidden"
                   onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
                   data-testid="input-product-csv"
@@ -205,9 +210,9 @@ export function ProductImportModal({ open, onOpenChange }: ProductImportModalPro
                 <div className="flex flex-col items-center gap-3 text-center">
                   <Upload className={`h-12 w-12 ${isDragging ? "text-primary" : "text-muted-foreground"}`} />
                   <div>
-                    <p className="font-medium text-lg">Drag and drop your Shopify CSV file</p>
+                    <p className="font-medium text-lg">Drag and drop your Shopify export file</p>
                     <p className="text-sm text-muted-foreground mt-1">
-                      or click to browse. Max file size: 10MB
+                      CSV or Excel (.xlsx, .xls) formats supported. Max file size: 10MB
                     </p>
                   </div>
                 </div>

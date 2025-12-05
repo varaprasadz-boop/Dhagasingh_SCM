@@ -1,4 +1,5 @@
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 
 // Shopify Product CSV Column Mappings
 export interface ShopifyProductRow {
@@ -123,8 +124,43 @@ export interface ParsedLineItem {
   compareAtPrice?: string;
 }
 
+// Check if file is Excel format
+export function isExcelFile(file: File): boolean {
+  const extension = file.name.toLowerCase();
+  return extension.endsWith('.xlsx') || extension.endsWith('.xls');
+}
+
+// Parse Excel file to rows
+async function parseExcel<T>(file: File): Promise<{ data: T[]; errors: string[] }> {
+  const errors: string[] = [];
+  
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+    
+    // Get first sheet
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) {
+      errors.push('No sheets found in Excel file');
+      return { data: [], errors };
+    }
+    
+    const worksheet = workbook.Sheets[sheetName];
+    
+    // Convert to JSON with headers
+    const jsonData = XLSX.utils.sheet_to_json<T>(worksheet, {
+      defval: '', // Use empty string for missing values
+    });
+    
+    return { data: jsonData, errors };
+  } catch (error: any) {
+    errors.push(`Excel parse error: ${error.message}`);
+    return { data: [], errors };
+  }
+}
+
 // Parse CSV file to rows
-export function parseCSV<T>(file: File): Promise<{ data: T[]; errors: string[] }> {
+function parseCSVFile<T>(file: File): Promise<{ data: T[]; errors: string[] }> {
   return new Promise((resolve) => {
     const errors: string[] = [];
     
@@ -145,6 +181,26 @@ export function parseCSV<T>(file: File): Promise<{ data: T[]; errors: string[] }
       },
     });
   });
+}
+
+// Parse file (CSV or Excel) to rows
+export async function parseCSV<T>(file: File): Promise<{ data: T[]; errors: string[] }> {
+  if (isExcelFile(file)) {
+    return parseExcel<T>(file);
+  }
+  return parseCSVFile<T>(file);
+}
+
+// Convert Excel data to CSV string (for sending to server)
+export async function fileToCSVString(file: File): Promise<string> {
+  if (isExcelFile(file)) {
+    const arrayBuffer = await file.arrayBuffer();
+    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    return XLSX.utils.sheet_to_csv(worksheet);
+  }
+  return file.text();
 }
 
 // Determine color/size from Shopify options
