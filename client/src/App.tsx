@@ -17,6 +17,7 @@ import Inventory from "@/pages/Inventory";
 import Products from "@/pages/Products";
 import Suppliers from "@/pages/Suppliers";
 import Couriers from "@/pages/Couriers";
+import CourierStatus from "@/pages/CourierStatus";
 import Complaints from "@/pages/Complaints";
 import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
@@ -41,6 +42,7 @@ function DesktopRouter() {
       <Route path="/products" component={Products} />
       <Route path="/suppliers" component={Suppliers} />
       <Route path="/couriers" component={Couriers} />
+      <Route path="/courier-status" component={CourierStatus} />
       <Route path="/complaints" component={Complaints} />
       <Route path="/reports" component={Reports} />
       <Route path="/settings" component={Settings} />

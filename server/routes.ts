@@ -933,6 +933,35 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/orders/bulk-status", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_COURIER_STATUS), async (req, res) => {
+    try {
+      const { updates } = req.body;
+      
+      if (!updates || !Array.isArray(updates) || updates.length === 0) {
+        return res.status(400).json({ error: "Updates array required" });
+      }
+
+      const result = await storage.bulkUpdateOrderStatuses(updates, req.user!.id);
+      
+      await storage.createAuditLog({
+        userId: req.user!.id,
+        action: "bulk_update",
+        module: "orders",
+        entityType: "order_status",
+        newData: { 
+          successful: result.successful, 
+          failed: result.failed,
+          updatedOrders: result.updatedOrders.map(o => o.orderNumber)
+        },
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("Bulk status update error:", error);
+      res.status(500).json({ error: "Failed to update order statuses" });
+    }
+  });
+
   app.delete("/api/orders/:id", authMiddleware, requirePermission(PERMISSION_CODES.DELETE_ORDERS), async (req, res) => {
     const order = await storage.getOrderById(req.params.id);
     if (!order) {

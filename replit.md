@@ -10,6 +10,21 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+**December 2024 - Courier Status Center**
+- Added CourierStatus page for bulk order status updates via CSV upload
+- CSV format: orderNumber, awbNumber (optional), newStatus
+- Bulk update API endpoint: POST /api/orders/bulk-status with permission: manage_courier_status
+- Status history tracking with who made changes and when
+- Recent updates tab shows orders with recent status changes
+- Order status history modal to view full status timeline
+- Added MANAGE_COURIER_STATUS permission to orders module
+
+**December 2024 - ReceiveStockModal Layout Fix**
+- Fixed layout issue where product cards were pushed below visible viewport
+- Restructured modal with fixed header, Separator, and scrollable products section with explicit min/max height
+- Added auto-scroll to newly added products via useRef and useEffect
+- Products container now properly constrained to max-h-[300px] with overflow-y-auto
+
 **December 2024 - Bulk Import with CSV and Excel Support**
 - Added ProductImportModal and OrderImportModal for bulk imports from Shopify exports
 - **Now supports both CSV and Excel (.xlsx, .xls) formats** without requiring file conversion

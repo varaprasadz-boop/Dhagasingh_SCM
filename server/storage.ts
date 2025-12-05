@@ -98,6 +98,7 @@ export interface IStorage {
   createOrder(order: InsertOrder, items: InsertOrderItem[]): Promise<OrderWithItems>;
   updateOrder(id: string, order: Partial<InsertOrder>): Promise<Order | undefined>;
   updateOrderStatus(id: string, status: Order["status"], comment?: string, userId?: string): Promise<Order | undefined>;
+  bulkUpdateOrderStatuses(updates: BulkStatusUpdate[], userId?: string): Promise<BulkStatusUpdateResult>;
   deleteOrder(id: string): Promise<boolean>;
   getOrderStatusHistory(orderId: string): Promise<any[]>;
   
@@ -177,6 +178,20 @@ interface AuditLogFilters {
   action?: string;
   fromDate?: Date;
   toDate?: Date;
+}
+
+export interface BulkStatusUpdate {
+  orderNumber: string;
+  awbNumber?: string;
+  newStatus: Order["status"];
+  comment?: string;
+}
+
+export interface BulkStatusUpdateResult {
+  successful: number;
+  failed: number;
+  errors: Array<{ orderNumber: string; error: string }>;
+  updatedOrders: Array<{ orderNumber: string; orderId: string; status: Order["status"] }>;
 }
 
 class DatabaseStorage implements IStorage {
@@ -878,6 +893,56 @@ class DatabaseStorage implements IStorage {
     return updated;
   }
 
+  async bulkUpdateOrderStatuses(updates: BulkStatusUpdate[], userId?: string): Promise<BulkStatusUpdateResult> {
+    const result: BulkStatusUpdateResult = {
+      successful: 0,
+      failed: 0,
+      errors: [],
+      updatedOrders: [],
+    };
+
+    for (const update of updates) {
+      try {
+        const order = await this.getOrderByNumber(update.orderNumber);
+        if (!order) {
+          result.failed++;
+          result.errors.push({ orderNumber: update.orderNumber, error: "Order not found" });
+          continue;
+        }
+
+        if (update.awbNumber && order.awbNumber !== update.awbNumber) {
+          await db.update(orders)
+            .set({ awbNumber: update.awbNumber, updatedAt: new Date() })
+            .where(eq(orders.id, order.id));
+        }
+
+        const updatedOrder = await this.updateOrderStatus(
+          order.id,
+          update.newStatus,
+          update.comment || `Status updated via bulk import`,
+          userId
+        );
+
+        if (updatedOrder) {
+          result.successful++;
+          result.updatedOrders.push({
+            orderNumber: update.orderNumber,
+            orderId: order.id,
+            status: update.newStatus,
+          });
+        } else {
+          result.failed++;
+          result.errors.push({ orderNumber: update.orderNumber, error: "Failed to update order status" });
+        }
+      } catch (error: any) {
+        result.failed++;
+        result.errors.push({ orderNumber: update.orderNumber, error: error.message || "Unknown error" });
+      }
+    }
+
+    return result;
+  }
+
   async deleteOrder(id: string): Promise<boolean> {
     await db.delete(orders).where(eq(orders.id, id));
     return true;
@@ -1290,6 +1355,7 @@ class DatabaseStorage implements IStorage {
       { code: "manage_settings", name: "Manage Settings", description: "Edit system settings", module: "settings" },
       { code: "view_couriers", name: "View Couriers", description: "View courier partners", module: "couriers" },
       { code: "manage_couriers", name: "Manage Couriers", description: "Add/edit couriers", module: "couriers" },
+      { code: "manage_courier_status", name: "Manage Courier Status", description: "Bulk update order statuses from courier data", module: "orders" },
       { code: "view_reports", name: "View Reports", description: "View reports", module: "reports" },
       { code: "export_reports", name: "Export Reports", description: "Export reports", module: "reports" },
     ];
@@ -1309,6 +1375,15 @@ class DatabaseStorage implements IStorage {
       }
     } else {
       createdPermissions.push(...existingPerms);
+      
+      const existingCodes = new Set(existingPerms.map(p => p.code));
+      const missingPerms = permissionData.filter(p => !existingCodes.has(p.code));
+      
+      for (const perm of missingPerms) {
+        console.log(`Adding missing permission: ${perm.code}`);
+        const created = await this.createPermission(perm);
+        createdPermissions.push(created);
+      }
     }
     console.log(`Loaded ${createdPermissions.length} permissions`);
 
@@ -1328,6 +1403,16 @@ class DatabaseStorage implements IStorage {
       
       for (const perm of createdPermissions) {
         await this.assignPermissionToRole(adminRole.id, perm.id);
+      }
+    } else {
+      const adminPerms = await this.getRolePermissions(adminRole.id);
+      const adminPermCodes = new Set(adminPerms.map(p => p.code));
+      
+      for (const perm of createdPermissions) {
+        if (!adminPermCodes.has(perm.code)) {
+          console.log(`Assigning missing permission to Admin: ${perm.code}`);
+          await this.assignPermissionToRole(adminRole.id, perm.id);
+        }
       }
     }
     console.log(`Admin role: ${adminRole.id}`);

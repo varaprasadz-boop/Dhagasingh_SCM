@@ -26,6 +26,7 @@ import {
   UserCog,
   PackageCheck,
   Shield,
+  RefreshCw,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
@@ -54,6 +55,7 @@ const navItems: NavItem[] = [
   { icon: PackageCheck, label: "Internal Delivery", path: "/internal-delivery", permission: "view_deliveries" },
   { icon: Users, label: "Suppliers", path: "/suppliers", permission: "view_suppliers" },
   { icon: Building2, label: "Couriers", path: "/couriers", permission: "view_couriers" },
+  { icon: RefreshCw, label: "Courier Status", path: "/courier-status", permission: "manage_courier_status" },
   { icon: MessageSquare, label: "Complaints", path: "/complaints", permission: "view_complaints" },
   { icon: FileBarChart, label: "Reports", path: "/reports", permission: "view_reports" },
   { icon: UserCog, label: "Users", path: "/users", permission: "manage_users" },

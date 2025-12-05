@@ -436,6 +436,7 @@ export const insertProductVariantSchema = createInsertSchema(productVariants).om
 export const insertCourierPartnerSchema = createInsertSchema(courierPartners).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true, createdAt: true });
+export const insertOrderStatusHistorySchema = createInsertSchema(orderStatusHistory).omit({ id: true, createdAt: true });
 export const insertStockMovementSchema = createInsertSchema(stockMovements).omit({ id: true, createdAt: true });
 export const insertComplaintSchema = createInsertSchema(complaints).omit({ id: true, createdAt: true, updatedAt: true, resolvedAt: true });
 export const insertComplaintTimelineSchema = createInsertSchema(complaintTimeline).omit({ id: true, createdAt: true });
@@ -467,6 +468,7 @@ export type InsertOrder = z.infer<typeof insertOrderSchema>;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
 export type OrderStatusHistory = typeof orderStatusHistory.$inferSelect;
+export type InsertOrderStatusHistory = z.infer<typeof insertOrderStatusHistorySchema>;
 export type StockMovement = typeof stockMovements.$inferSelect;
 export type InsertStockMovement = z.infer<typeof insertStockMovementSchema>;
 export type Complaint = typeof complaints.$inferSelect;
@@ -570,6 +572,9 @@ export const PERMISSION_CODES = {
   // Courier Partners
   VIEW_COURIERS: "view_couriers",
   MANAGE_COURIERS: "manage_couriers",
+  
+  // Courier Status (Bulk Updates)
+  MANAGE_COURIER_STATUS: "manage_courier_status",
   
   // Reports
   VIEW_REPORTS: "view_reports",

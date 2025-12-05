@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import {
@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -60,6 +59,7 @@ export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStoc
   const [productEntries, setProductEntries] = useState<ProductEntry[]>([
     { id: "1", productId: "", variants: {} },
   ]);
+  const productsContainerRef = useRef<HTMLDivElement>(null);
 
   const { data: suppliers = [] } = useQuery<Supplier[]>({
     queryKey: ["/api/suppliers"],
@@ -110,6 +110,17 @@ export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStoc
       { id: String(Date.now()), productId: "", variants: {} },
     ]);
   };
+
+  useEffect(() => {
+    if (productEntries.length > 1 && productsContainerRef.current) {
+      setTimeout(() => {
+        productsContainerRef.current?.scrollTo({
+          top: productsContainerRef.current.scrollHeight,
+          behavior: 'smooth'
+        });
+      }, 100);
+    }
+  }, [productEntries.length]);
 
   const removeProduct = (id: string) => {
     if (productEntries.length > 1) {
@@ -187,7 +198,6 @@ export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStoc
   const handleSubmit = () => {
     if (!selectedSupplier || productEntries.every((p) => !p.productId)) return;
 
-    // Filter products that have at least one variant with quantity > 0
     const validProducts = productEntries.filter((p) => {
       if (!p.productId || !p.variants) return false;
       return Object.values(p.variants).some((v) => {
@@ -226,256 +236,257 @@ export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStoc
       onOpenChange(isOpen);
       if (!isOpen) resetForm();
     }}>
-      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-hidden flex flex-col" data-testid="modal-receive-stock">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] flex flex-col" data-testid="modal-receive-stock">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Receive Stock</DialogTitle>
           <DialogDescription>Add multiple products with variants in a single receipt</DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 pr-4">
-          <div className="space-y-6 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Supplier</Label>
-                <Select value={selectedSupplier} onValueChange={setSelectedSupplier}>
-                  <SelectTrigger data-testid="select-supplier">
-                    <SelectValue placeholder="Select supplier" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activeSuppliers.length === 0 ? (
-                      <SelectItem value="none" disabled>No active suppliers</SelectItem>
-                    ) : (
-                      activeSuppliers.map((supplier) => (
-                        <SelectItem key={supplier.id} value={supplier.id}>
-                          {supplier.name}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Invoice Number</Label>
-                <Input
-                  value={invoiceNumber}
-                  onChange={(e) => setInvoiceNumber(e.target.value)}
-                  placeholder="INV-2024-001"
-                  data-testid="input-invoice-number"
-                />
-              </div>
+        <div className="shrink-0 space-y-4 py-2">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Supplier</Label>
+              <Select value={selectedSupplier} onValueChange={setSelectedSupplier}>
+                <SelectTrigger data-testid="select-supplier">
+                  <SelectValue placeholder="Select supplier" />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeSuppliers.length === 0 ? (
+                    <SelectItem value="none" disabled>No active suppliers</SelectItem>
+                  ) : (
+                    activeSuppliers.map((supplier) => (
+                      <SelectItem key={supplier.id} value={supplier.id}>
+                        {supplier.name}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Invoice Date</Label>
-                <Input
-                  type="date"
-                  value={invoiceDate}
-                  onChange={(e) => setInvoiceDate(e.target.value)}
-                  data-testid="input-invoice-date"
-                />
-              </div>
+            <div className="space-y-2">
+              <Label>Invoice Number</Label>
+              <Input
+                value={invoiceNumber}
+                onChange={(e) => setInvoiceNumber(e.target.value)}
+                placeholder="INV-2024-001"
+                data-testid="input-invoice-number"
+              />
+            </div>
+          </div>
 
-              <div className="space-y-2">
-                <Label>Invoice Photo (Optional)</Label>
-                <FileUpload
-                  accept="image/*"
-                  label="Upload Photo"
-                  description="JPG, PNG up to 5MB"
-                  onUpload={(file) => setInvoicePhoto(file)}
-                />
-                {invoicePhoto && (
-                  <p className="text-xs text-muted-foreground">{invoicePhoto.name}</p>
-                )}
-              </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Invoice Date</Label>
+              <Input
+                type="date"
+                value={invoiceDate}
+                onChange={(e) => setInvoiceDate(e.target.value)}
+                data-testid="input-invoice-date"
+              />
             </div>
 
-            <Separator />
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <Label className="text-base font-semibold">Products</Label>
-                <Button variant="outline" size="sm" onClick={addProduct} data-testid="button-add-product">
-                  <Plus className="h-4 w-4 mr-1" />
-                  Add Product
-                </Button>
-              </div>
-
-              {productsLoading ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin opacity-50" />
-                  <p>Loading products...</p>
-                </div>
-              ) : products.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p>No products available. Create products first.</p>
-                </div>
-              ) : (
-                productEntries.map((entry, index) => {
-                  const productData = getProductData(entry.productId);
-                  const entryTotal = getTotalQuantity(entry);
-
-                  return (
-                    <div key={entry.id} className="border-2 border-border bg-card rounded-lg p-4 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Package className="h-4 w-4 text-primary" />
-                          <span className="font-semibold text-foreground">Product {index + 1}</span>
-                        </div>
-                        {productEntries.length > 1 && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeProduct(entry.id)}
-                            data-testid={`button-remove-product-${index}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Product</Label>
-                        <Select
-                          value={entry.productId}
-                          onValueChange={(v) => initializeVariantsWithDefaultPrice(entry.id, v)}
-                        >
-                          <SelectTrigger data-testid={`select-product-${index}`}>
-                            <SelectValue placeholder="Select product" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {products.map((product) => (
-                              <SelectItem key={product.id} value={product.id}>
-                                {product.name} ({product.variants.length} variants)
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {productData && productData.variants.length > 0 && (
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between">
-                            <Label className="text-sm">Variants (Color / Size)</Label>
-                            <span className="text-xs text-muted-foreground">
-                              Enter quantity and cost for each variant
-                            </span>
-                          </div>
-                          <div className="border rounded-lg overflow-hidden">
-                            <table className="w-full text-sm">
-                              <thead className="bg-muted/50">
-                                <tr>
-                                  <th className="text-left p-2 font-medium">Variant</th>
-                                  <th className="text-left p-2 font-medium">SKU</th>
-                                  <th className="text-center p-2 font-medium w-24">Qty</th>
-                                  <th className="text-center p-2 font-medium w-28">Cost (₹)</th>
-                                  <th className="text-right p-2 font-medium w-24">Total</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y">
-                                {productData.variants.map((variant) => {
-                                  const variantData = (entry.variants && entry.variants[variant.id]) || { quantity: 0, costPrice: "" };
-                                  const lineTotal = (variantData.quantity || 0) * (parseFloat(variantData.costPrice) || 0);
-                                  return (
-                                    <tr key={variant.id} className="hover:bg-muted/30">
-                                      <td className="p-2">
-                                        <div className="flex items-center gap-2">
-                                          {variant.color && (
-                                            <div
-                                              className="w-3 h-3 rounded-full border shrink-0"
-                                              style={{
-                                                backgroundColor:
-                                                  variant.color.toLowerCase() === "white"
-                                                    ? "#f8f8f8"
-                                                    : variant.color.toLowerCase(),
-                                              }}
-                                            />
-                                          )}
-                                          <span>
-                                            {variant.color || "-"} / {variant.size || "-"}
-                                          </span>
-                                        </div>
-                                      </td>
-                                      <td className="p-2">
-                                        <span className="font-mono text-xs text-muted-foreground">
-                                          {variant.sku}
-                                        </span>
-                                      </td>
-                                      <td className="p-2">
-                                        <Input
-                                          type="number"
-                                          min="0"
-                                          className="w-20 h-8 text-sm text-center"
-                                          value={variantData.quantity || ""}
-                                          onChange={(e) =>
-                                            updateVariant(entry.id, variant.id, "quantity", parseInt(e.target.value) || 0)
-                                          }
-                                          placeholder="0"
-                                          data-testid={`input-qty-${variant.sku}`}
-                                        />
-                                      </td>
-                                      <td className="p-2">
-                                        <Input
-                                          type="number"
-                                          min="0"
-                                          step="0.01"
-                                          className="w-24 h-8 text-sm text-center"
-                                          value={variantData.costPrice || ""}
-                                          onChange={(e) =>
-                                            updateVariant(entry.id, variant.id, "costPrice", e.target.value)
-                                          }
-                                          placeholder="0.00"
-                                          data-testid={`input-cost-${variant.sku}`}
-                                        />
-                                      </td>
-                                      <td className="p-2 text-right font-medium">
-                                        {lineTotal > 0 ? `₹${lineTotal.toFixed(2)}` : "-"}
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      )}
-
-                      {productData && productData.variants.length === 0 && (
-                        <div className="text-sm text-muted-foreground p-2 bg-muted rounded-md">
-                          No variants found for this product.
-                        </div>
-                      )}
-
-                      {entryTotal > 0 && (
-                        <div className="flex items-center justify-between p-2 bg-muted rounded-md text-sm">
-                          <span>Subtotal:</span>
-                          <span className="font-medium">{entryTotal} units | ₹{getTotalCost(entry).toFixed(2)}</span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
+            <div className="space-y-2">
+              <Label>Invoice Photo (Optional)</Label>
+              <FileUpload
+                accept="image/*"
+                label="Upload Photo"
+                description="JPG, PNG up to 5MB"
+                onUpload={(file) => setInvoicePhoto(file)}
+              />
+              {invoicePhoto && (
+                <p className="text-xs text-muted-foreground">{invoicePhoto.name}</p>
               )}
             </div>
-
-            {grandQuantity > 0 && (
-              <div className="p-4 bg-primary/10 rounded-lg">
-                <div className="flex justify-between text-sm mb-1">
-                  <span>Total Units:</span>
-                  <span className="font-semibold">{grandQuantity}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-medium">Grand Total:</span>
-                  <span className="text-lg font-bold">₹{grandTotal.toFixed(2)}</span>
-                </div>
-              </div>
-            )}
           </div>
-        </ScrollArea>
+        </div>
 
-        <DialogFooter className="mt-4">
+        <Separator className="shrink-0" />
+
+        <div className="flex items-center justify-between shrink-0 py-2">
+          <Label className="text-base font-semibold">Products</Label>
+          <Button variant="outline" size="sm" onClick={addProduct} data-testid="button-add-product">
+            <Plus className="h-4 w-4 mr-1" />
+            Add Product
+          </Button>
+        </div>
+
+        <div 
+          ref={productsContainerRef}
+          className="flex-1 overflow-y-auto min-h-[200px] max-h-[300px] space-y-4 pr-2"
+        >
+          {productsLoading ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin opacity-50" />
+              <p>Loading products...</p>
+            </div>
+          ) : products.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p>No products available. Create products first.</p>
+            </div>
+          ) : (
+            productEntries.map((entry, index) => {
+              const productData = getProductData(entry.productId);
+              const entryTotal = getTotalQuantity(entry);
+
+              return (
+                <div key={entry.id} className="border-2 border-border bg-card rounded-lg p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Package className="h-4 w-4 text-primary" />
+                      <span className="font-semibold text-foreground">Product {index + 1}</span>
+                    </div>
+                    {productEntries.length > 1 && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeProduct(entry.id)}
+                        data-testid={`button-remove-product-${index}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Select a product to add stock</Label>
+                    <Select
+                      value={entry.productId}
+                      onValueChange={(v) => initializeVariantsWithDefaultPrice(entry.id, v)}
+                    >
+                      <SelectTrigger data-testid={`select-product-${index}`}>
+                        <SelectValue placeholder="Choose product from list..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {products.map((product) => (
+                          <SelectItem key={product.id} value={product.id}>
+                            {product.name} ({product.variants.length} variants)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {productData && productData.variants.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm">Variants (Color / Size)</Label>
+                        <span className="text-xs text-muted-foreground">
+                          Enter quantity and cost for each variant
+                        </span>
+                      </div>
+                      <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50">
+                            <tr>
+                              <th className="text-left p-2 font-medium">Variant</th>
+                              <th className="text-left p-2 font-medium">SKU</th>
+                              <th className="text-center p-2 font-medium w-24">Qty</th>
+                              <th className="text-center p-2 font-medium w-28">Cost (₹)</th>
+                              <th className="text-right p-2 font-medium w-24">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {productData.variants.map((variant) => {
+                              const variantData = (entry.variants && entry.variants[variant.id]) || { quantity: 0, costPrice: "" };
+                              const lineTotal = (variantData.quantity || 0) * (parseFloat(variantData.costPrice) || 0);
+                              return (
+                                <tr key={variant.id} className="hover:bg-muted/30">
+                                  <td className="p-2">
+                                    <div className="flex items-center gap-2">
+                                      {variant.color && (
+                                        <div
+                                          className="w-3 h-3 rounded-full border shrink-0"
+                                          style={{
+                                            backgroundColor:
+                                              variant.color.toLowerCase() === "white"
+                                                ? "#f8f8f8"
+                                                : variant.color.toLowerCase(),
+                                          }}
+                                        />
+                                      )}
+                                      <span>
+                                        {variant.color || "-"} / {variant.size || "-"}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="p-2">
+                                    <span className="font-mono text-xs text-muted-foreground">
+                                      {variant.sku}
+                                    </span>
+                                  </td>
+                                  <td className="p-2">
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      className="w-20 h-8 text-sm text-center"
+                                      value={variantData.quantity || ""}
+                                      onChange={(e) =>
+                                        updateVariant(entry.id, variant.id, "quantity", parseInt(e.target.value) || 0)
+                                      }
+                                      placeholder="0"
+                                      data-testid={`input-qty-${variant.sku}`}
+                                    />
+                                  </td>
+                                  <td className="p-2">
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      className="w-24 h-8 text-sm text-center"
+                                      value={variantData.costPrice || ""}
+                                      onChange={(e) =>
+                                        updateVariant(entry.id, variant.id, "costPrice", e.target.value)
+                                      }
+                                      placeholder="0.00"
+                                      data-testid={`input-cost-${variant.sku}`}
+                                    />
+                                  </td>
+                                  <td className="p-2 text-right font-medium">
+                                    {lineTotal > 0 ? `₹${lineTotal.toFixed(2)}` : "-"}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {productData && productData.variants.length === 0 && (
+                    <div className="text-sm text-muted-foreground p-2 bg-muted rounded-md">
+                      No variants found for this product.
+                    </div>
+                  )}
+
+                  {entryTotal > 0 && (
+                    <div className="flex items-center justify-between p-2 bg-muted rounded-md text-sm">
+                      <span>Subtotal:</span>
+                      <span className="font-medium">{entryTotal} units | ₹{getTotalCost(entry).toFixed(2)}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {grandQuantity > 0 && (
+          <div className="shrink-0 p-4 bg-primary/10 rounded-lg mt-2">
+            <div className="flex justify-between text-sm mb-1">
+              <span>Total Units:</span>
+              <span className="font-semibold">{grandQuantity}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="font-medium">Grand Total:</span>
+              <span className="text-lg font-bold">₹{grandTotal.toFixed(2)}</span>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="shrink-0 mt-4">
           <Button 
             variant="outline" 
             onClick={() => onOpenChange(false)} 
