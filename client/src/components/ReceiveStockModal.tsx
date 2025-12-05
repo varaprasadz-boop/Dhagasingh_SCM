@@ -66,7 +66,7 @@ export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStoc
     enabled: open,
   });
 
-  const { data: products = [] } = useQuery<ProductWithVariants[]>({
+  const { data: products = [], isLoading: productsLoading } = useQuery<ProductWithVariants[]>({
     queryKey: ["/api/products"],
     enabled: open,
   });
@@ -302,7 +302,12 @@ export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStoc
                 </Button>
               </div>
 
-              {products.length === 0 ? (
+              {productsLoading ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin opacity-50" />
+                  <p>Loading products...</p>
+                </div>
+              ) : products.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
                   <p>No products available. Create products first.</p>
@@ -313,11 +318,11 @@ export function ReceiveStockModal({ open, onOpenChange, onReceive }: ReceiveStoc
                   const entryTotal = getTotalQuantity(entry);
 
                   return (
-                    <div key={entry.id} className="border rounded-lg p-4 space-y-4">
+                    <div key={entry.id} className="border-2 border-border bg-card rounded-lg p-4 space-y-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <Package className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium">Product {index + 1}</span>
+                          <Package className="h-4 w-4 text-primary" />
+                          <span className="font-semibold text-foreground">Product {index + 1}</span>
                         </div>
                         {productEntries.length > 1 && (
                           <Button
