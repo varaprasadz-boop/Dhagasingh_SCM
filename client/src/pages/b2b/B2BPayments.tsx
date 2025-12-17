@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -124,6 +124,10 @@ export default function B2BPayments() {
       order?.client?.companyName?.toLowerCase().includes(search.toLowerCase())
     );
   });
+
+  useEffect(() => {
+    setDisplayCount(ITEMS_PER_PAGE);
+  }, [search]);
 
   const formatCurrency = (amount: string | number) => {
     const num = typeof amount === "string" ? parseFloat(amount) : amount;
