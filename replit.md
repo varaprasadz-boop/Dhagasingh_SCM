@@ -2,237 +2,82 @@
 
 ## Overview
 
-DS_SCM is a comprehensive supply chain management system designed for eCommerce operations. The application manages the complete lifecycle of inventory, orders, logistics, and customer complaints. It provides role-based interfaces for administrators, warehouse staff, customer support, and stock management teams. The system supports both desktop and mobile (PWA) experiences, with desktop optimized for data-heavy operations and mobile optimized for on-the-go actions like scanning and status updates.
+DS_SCM is a comprehensive supply chain management system for eCommerce, managing inventory, orders, logistics, and customer complaints. It provides role-based interfaces (admin, warehouse, customer support, stock management) and supports both desktop (data-heavy operations) and mobile PWA (on-the-go actions like scanning and status updates) experiences. Key features include a B2B corporate module with a 10-stage workflow, bulk import/export capabilities for products and orders, enhanced stock receiving with per-variant pricing, and a custom complaint reason input. The system aims to streamline eCommerce supply chain operations from end to end.
 
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
 
-## Recent Changes
-
-**December 2024 - Courier Status Center**
-- Added CourierStatus page for bulk order status updates
-- **Supports both CSV and Excel (.xlsx, .xls) formats** for bulk uploads
-- Uses shared parseCSV utility from shopifyImport.ts for consistent file handling
-- CSV/Excel format: orderNumber, awbNumber (optional), newStatus
-- Bulk update API endpoint: POST /api/orders/bulk-status with permission: manage_courier_status
-- Status history tracking with who made changes and when
-- Recent updates tab shows orders with recent status changes
-- Order status history modal to view full status timeline
-- Added MANAGE_COURIER_STATUS permission to orders module
-- Seed logic auto-assigns new permissions to Admin role for existing databases
-
-**December 2024 - ReceiveStockModal Layout Fix**
-- Fixed layout issue where product cards were pushed below visible viewport
-- Restructured modal with fixed header, Separator, and scrollable products section with explicit min/max height
-- Added auto-scroll to newly added products via useRef and useEffect
-- Products container now properly constrained to max-h-[300px] with overflow-y-auto
-
-**December 2024 - Bulk Import with CSV and Excel Support**
-- Added ProductImportModal and OrderImportModal for bulk imports from Shopify exports
-- **Now supports both CSV and Excel (.xlsx, .xls) formats** without requiring file conversion
-- Excel parsing via SheetJS (xlsx library) - converts Excel to CSV internally for server processing
-- Products import (POST /api/products/import): Groups rows by Handle, creates products with variants, validates duplicate SKUs
-- Orders import (POST /api/orders/import): Groups rows by Order Name, creates orders with line items
-- Import modals feature: drag-drop file upload, data preview, validation errors, progress indication, import summary
-- Shopify CSV column mapping:
-  - Products: Handle, Title, Type, Vendor, Body (HTML), Option1/2/3 Name & Value, Variant SKU, Variant Price, Cost per item, Variant Inventory Qty
-  - Orders: Name, Email, Total, Financial Status, Fulfillment Status, Shipping fields, Lineitem fields
-- Duplicate SKU validation checks both within batch and against existing database records
-- File parsing utilities at client/src/lib/shopifyImport.ts: parseCSV() handles both formats, fileToCSVString() for conversion
-
-**December 2024 - Custom Complaint Reason Input**
-- Added "Other" option in complaint reason dropdown with dynamic text input field
-- When "Other" is selected, a text input appears for custom reason specification
-- Custom reasons are prepended to the description field as "[Reason: custom text]" to preserve enum validation
-- Validation ensures custom reason is provided when "Other" is selected
-
-**December 2024 - Enhanced Receive Stock with Per-Variant Pricing**
-- ReceiveStockModal now supports multiple products per invoice, each with multiple variants
-- Per-variant pricing: each variant can have individual quantity and cost price inputs in a table format
-- Created batch API endpoint (POST /api/stock-movements/batch-receive) for multi-product, multi-variant stock receipts
-- Real-time line totals and grand totals calculated as user enters data
-- Stock movement type uses "inward" enum value for receiving stock
-- Mutation properly parses JSON response and handles success/error states with toast notifications
-
-**December 2024 - Real API Integration Complete**
-- All desktop pages (Dashboard, Orders, Inventory, Reports, Complaints, Couriers, Internal Delivery, Products, Suppliers, User Management, Roles Management) now use real API data
-- All mobile pages (MobileDashboard, MobileOrders, MobileStock) now use real API data
-- Reports page rebuilt to use dashboard stats API for dynamic analytics
-- OrderCard component updated to use schema types instead of mock data types
-- DispatchModal updated to fetch couriers from API
-- Mock data (mockData.ts) is deprecated - all components should use API endpoints
-
 ## System Architecture
 
 ### Frontend Architecture
 
-**Framework & Build System**
-- React 18 with TypeScript for type-safe component development
-- Vite as the build tool and development server for fast HMR and optimized production builds
-- Wouter for lightweight client-side routing
-- Progressive Web App (PWA) capabilities with manifest.json for mobile installation
-
-**UI Framework & Styling**
-- shadcn/ui component library built on Radix UI primitives for accessible, composable components
-- Tailwind CSS with custom design tokens following Material Design principles with Linear's typography and Notion's information hierarchy
-- Custom theming system supporting light/dark modes with CSS variables
-- Design philosophy: Information density over whitespace, optimized for quick task completion
-- Typography: Inter font family for UI, JetBrains Mono for monospace data (SKUs, order IDs)
-
-**State Management**
-- React Context API for global state (Auth, Theme, Mobile detection)
-- TanStack Query (React Query) for server state management and caching
-- Local component state with React hooks for UI interactions
-
-**Responsive Design Strategy**
-- Desktop-first for data-heavy operations with persistent sidebar navigation
-- Mobile-optimized views with bottom navigation bar for one-handed operation
-- Separate mobile page components (MobileDashboard, MobileOrders, etc.) for touch-optimized experiences
-- Responsive breakpoint at 768px (md) for mobile/desktop switching
+-   **Framework & Build System**: React 18, TypeScript, Vite, Wouter for routing, PWA capabilities.
+-   **UI Framework & Styling**: shadcn/ui (built on Radix UI), Tailwind CSS with custom theming (light/dark modes), Material Design principles. Design philosophy prioritizes information density and quick task completion.
+-   **State Management**: React Context API for global state, TanStack Query for server state and caching, React hooks for local component state.
+-   **Responsive Design**: Desktop-first for data-heavy tasks, mobile-optimized views with separate components (e.g., MobileDashboard) for touch-optimized experiences.
 
 ### Backend Architecture
 
-**Server Framework**
-- Express.js with TypeScript for the API server
-- HTTP server using Node's native `http` module for WebSocket upgrade capability
-- Middleware chain: JSON body parsing, URL encoding, request logging with timestamps
-
-**Data Layer**
-- Drizzle ORM for type-safe database queries and schema management
-- PostgreSQL as the primary database (configured via @neondatabase/serverless)
-- Schema-first approach with Drizzle-Zod integration for runtime validation
-- Memory storage implementation (MemStorage) for development/testing with interface-based design for easy database swapping
-
-**Neon HTTP Driver Workarounds**
-The Neon HTTP driver has several known issues that require specific patterns:
-
-1. **Boolean Type Mapping**: PostgreSQL 't'/'f' values are incorrectly converted to JavaScript `false`. Solution: Use raw SQL with `::text` cast and `getBooleanValue()` helper function in `server/db.ts`.
-
-2. **INSERT...RETURNING Returns Undefined**: The `INSERT...RETURNING` pattern can return undefined instead of the inserted row. Solution: All create methods pre-generate IDs using `crypto.randomUUID()`, insert without RETURNING, then fetch the created record:
-   ```typescript
-   async createEntity(data: InsertData): Promise<Entity> {
-     const id = crypto.randomUUID();
-     await db.insert(entities).values({ ...data, id });
-     const created = await this.getEntityById(id);
-     if (!created) throw new Error("Failed to create entity");
-     return created;
-   }
-   ```
-
-3. **Empty Result Sets Return Null**: Drizzle queries may return null for empty result sets. Solution: Wrap query methods in try-catch and use optional chaining (`result?.[0]`) with null fallbacks (`return result || []`).
-
-**API Design**
-- RESTful API pattern with `/api` prefix for all application routes
-- Request/response logging middleware tracking method, path, status, and duration
-- Credential-based authentication (cookies) for session management
-- Separation of concerns: routes.ts for route definitions, storage.ts for data operations
-
-**Build & Deployment**
-- Custom build script using esbuild for server bundling with selective dependency bundling
-- Separate client (Vite) and server (esbuild) build processes
-- Production-ready bundle with externalized dependencies and optimized tree-shaking
-- Development mode with Vite HMR and live reload
+-   **Server Framework**: Express.js with TypeScript, Node's native `http` module for WebSocket upgrade capability.
+-   **Data Layer**: Drizzle ORM for type-safe queries, PostgreSQL (@neondatabase/serverless) as the primary database, Drizzle-Zod for runtime validation. Specific workarounds implemented for Neon HTTP driver issues (Boolean type mapping, INSERT...RETURNING undefined, empty result sets returning null).
+-   **API Design**: RESTful API (`/api` prefix), request/response logging, credential-based authentication (cookies).
+-   **Build & Deployment**: Custom esbuild script for server bundling, separate client (Vite) and server (esbuild) build processes.
 
 ### Role-Based Access Control
 
-**User Roles**
-- **Admin**: Full system access including analytics, user management, and system settings
-- **Warehouse**: Order fulfillment, inventory management, and dispatch operations
-- **Customer Support**: Complaint handling, order status management, and customer communication
-- **Stock Management**: Inventory tracking, stock receiving, and supplier coordination
-
-**Context-Based Authorization**
-- AuthContext provides current user role and authentication state
-- Component-level role filtering for navigation items and feature access
-- Role-specific page layouts and available actions
+-   **User Roles**: Admin, Warehouse, Customer Support, Stock Management with context-based authorization.
+-   **Permissions**: Component-level role filtering for navigation and feature access.
 
 ### Data Models
 
-**Core Entities**
-- **Users**: Authentication with username/password, role assignment
-- **Products**: Multi-variant support (color, size), category organization
-- **Product Variants**: SKU-based tracking with cost/selling prices, stock quantities
-- **Orders**: Customer information, payment method (COD/prepaid), status workflow
-- **Suppliers**: Contact details, GST information, active/inactive status
-- **Courier Partners**: Third-party and in-house delivery options with API integration support
-- **Complaints**: Ticket-based system with reason categorization and resolution workflow
-- **Stock Movements**: Audit trail for inventory changes with timestamps and reasons
-- **Internal Deliveries**: In-house delivery tracking with payment collection
-
-**Status Workflows**
-- Orders: pending → dispatched → delivered (or RTO → returned → refunded)
-- Complaints: open → in_progress → resolved/rejected
-- Internal Deliveries: assigned → out_for_delivery → delivered → payment_collected
+-   **Core Entities**: Users, Products (multi-variant), Product Variants, Orders, Suppliers, Courier Partners, Complaints, Stock Movements, Internal Deliveries.
+-   **Status Workflows**: Defined for Orders, Complaints, and Internal Deliveries.
 
 ### Key Features
 
-**Inventory Management**
-- Stock receiving with supplier tracking and invoice documentation
-- Product variant management with color/size combinations
-- Low stock alerts and reorder notifications
-- Manual stock adjustment with reason tracking
-- Stock movement history with filtering and search
-
-**Order Processing**
-- CSV import for bulk order creation (Shopify integration)
-- Manual order dispatch with courier selection
-- Third-party courier API integration framework
-- In-house delivery assignment with driver tracking
-- AWB number management for shipment tracking
-
-**Complaint Management**
-- Ticket-based system with unique ticket numbers
-- Resolution options: refund, replacement, rejection
-- Timeline tracking for complaint lifecycle
-- Integration with order and inventory systems for replacements
-
-**Mobile-Optimized Workflows**
-- Invoice scanning with OCR for quick stock receiving
-- Barcode/QR scanning for order verification
-- One-tap status updates for delivery personnel
-- Mobile payment collection (cash/QR code) for COD orders
-- Touch-friendly action buttons and minimal input forms
+-   **Inventory Management**: Stock receiving (multi-product, multi-variant pricing), variant management, low stock alerts, stock movement history.
+-   **Order Processing**: Bulk import (CSV/Excel) from Shopify, manual dispatch with courier selection, AWB management.
+-   **Complaint Management**: Ticket-based system, resolution options, timeline tracking.
+-   **Mobile-Optimized Workflows**: Invoice scanning (OCR), barcode/QR scanning, one-tap status updates, mobile payment collection.
+-   **B2B Corporate Module**: Dedicated B2B module with clients, orders, invoices, payments, and a 10-stage workflow, including payment milestone tracking.
+-   **Courier Status Center**: Bulk order status updates via CSV/Excel, status history tracking.
 
 ## External Dependencies
 
 ### UI Component Libraries
-- **@radix-ui/react-***: Comprehensive set of accessible, unstyled UI primitives (dialogs, dropdowns, tabs, etc.)
-- **shadcn/ui**: Pre-styled components built on Radix UI following design system
-- **lucide-react**: Icon library for consistent iconography
+
+-   **@radix-ui/react-\***: Accessible, unstyled UI primitives.
+-   **shadcn/ui**: Styled components built on Radix UI.
+-   **lucide-react**: Icon library.
 
 ### Data & Forms
-- **@tanstack/react-query**: Server state management with caching and automatic refetching
-- **@hookform/resolvers**: Form validation integration with react-hook-form
-- **zod**: Schema validation for runtime type checking
-- **drizzle-zod**: Integration layer between Drizzle ORM and Zod validation
+
+-   **@tanstack/react-query**: Server state management.
+-   **@hookform/resolvers**: Form validation integration.
+-   **zod**: Schema validation.
+-   **drizzle-zod**: Drizzle ORM and Zod integration.
 
 ### Database & ORM
-- **drizzle-orm**: Type-safe ORM for PostgreSQL with migrations support
-- **@neondatabase/serverless**: Serverless PostgreSQL driver for edge deployments
-- **drizzle-kit**: CLI tool for schema migrations and database introspection
+
+-   **drizzle-orm**: Type-safe ORM for PostgreSQL.
+-   **@neondatabase/serverless**: Serverless PostgreSQL driver.
+-   **drizzle-kit**: Schema migrations and introspection.
 
 ### Styling & Theming
-- **tailwindcss**: Utility-first CSS framework
-- **class-variance-authority**: Type-safe component variant management
-- **clsx & tailwind-merge**: Conditional class name composition
+
+-   **tailwindcss**: Utility-first CSS framework.
+-   **class-variance-authority**: Component variant management.
+-   **clsx & tailwind-merge**: Class name composition.
 
 ### Utilities
-- **date-fns**: Date manipulation and formatting
-- **nanoid**: Unique ID generation for entities
-- **wouter**: Minimal routing library for React
+
+-   **date-fns**: Date manipulation.
+-   **nanoid**: Unique ID generation.
+-   **wouter**: Minimal routing library.
 
 ### Development Tools
-- **vite**: Build tool with HMR and optimized production builds
-- **tsx**: TypeScript execution for development server
-- **@replit/vite-plugin-***: Replit-specific development tooling (runtime error overlay, cartographer, dev banner)
 
-### Future Integration Points
-- **CSV parsing**: papaparse for order/product imports
-- **File handling**: multer for invoice/image uploads
-- **Email notifications**: nodemailer for order/stock alerts
-- **Payment processing**: Stripe integration framework
-- **Session management**: express-session with connect-pg-simple for PostgreSQL-backed sessions
-- **Authentication**: passport.js with local strategy
-- **WebSocket support**: ws for real-time updates
-- **Spreadsheet export**: xlsx for report generation
+-   **vite**: Build tool.
+-   **tsx**: TypeScript execution.
+-   **@replit/vite-plugin-\***: Replit-specific tooling.
