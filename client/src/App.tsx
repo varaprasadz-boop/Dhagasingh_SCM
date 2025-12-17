@@ -33,6 +33,13 @@ import MobileStock from "@/pages/MobileStock";
 import MobileScan from "@/pages/MobileScan";
 import MobileProfile from "@/pages/MobileProfile";
 
+import B2BDashboard from "@/pages/b2b/B2BDashboard";
+import B2BClients from "@/pages/b2b/B2BClients";
+import B2BOrders from "@/pages/b2b/B2BOrders";
+import B2BOrderDetail from "@/pages/b2b/B2BOrderDetail";
+import B2BInvoices from "@/pages/b2b/B2BInvoices";
+import B2BPayments from "@/pages/b2b/B2BPayments";
+
 function DesktopRouter() {
   return (
     <Switch>
@@ -49,6 +56,12 @@ function DesktopRouter() {
       <Route path="/internal-delivery" component={InternalDelivery} />
       <Route path="/users" component={UserManagement} />
       <Route path="/roles" component={RolesManagement} />
+      <Route path="/b2b" component={B2BDashboard} />
+      <Route path="/b2b/clients" component={B2BClients} />
+      <Route path="/b2b/orders" component={B2BOrders} />
+      <Route path="/b2b/orders/:id" component={B2BOrderDetail} />
+      <Route path="/b2b/invoices" component={B2BInvoices} />
+      <Route path="/b2b/payments" component={B2BPayments} />
       <Route component={NotFound} />
     </Switch>
   );

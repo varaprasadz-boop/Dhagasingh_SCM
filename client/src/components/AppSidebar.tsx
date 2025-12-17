@@ -27,6 +27,9 @@ import {
   PackageCheck,
   Shield,
   RefreshCw,
+  Briefcase,
+  FileText,
+  CreditCard,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
@@ -63,6 +66,14 @@ const navItems: NavItem[] = [
   { icon: Settings, label: "Settings", path: "/settings", permission: "manage_settings" },
 ];
 
+const b2bNavItems: NavItem[] = [
+  { icon: LayoutDashboard, label: "B2B Dashboard", path: "/b2b", permission: "view_b2b_dashboard" },
+  { icon: Building2, label: "Clients", path: "/b2b/clients", permission: "view_b2b_clients" },
+  { icon: Briefcase, label: "B2B Orders", path: "/b2b/orders", permission: "view_b2b_orders" },
+  { icon: FileText, label: "Invoices", path: "/b2b/invoices", permission: "view_b2b_invoices" },
+  { icon: CreditCard, label: "Payments", path: "/b2b/payments", permission: "view_b2b_payments" },
+];
+
 export function AppSidebar() {
   const [location] = useLocation();
   const { user, isSuperAdmin, hasPermission, logout } = useAuth();
@@ -71,6 +82,13 @@ export function AppSidebar() {
     if (item.superAdminOnly) {
       return isSuperAdmin;
     }
+    if (item.permission) {
+      return hasPermission(item.permission);
+    }
+    return true;
+  });
+
+  const filteredB2BItems = b2bNavItems.filter((item) => {
     if (item.permission) {
       return hasPermission(item.permission);
     }
@@ -99,11 +117,11 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel>eCommerce</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {filteredItems.map((item) => {
-                const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path));
+                const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path) && !location.startsWith("/b2b"));
                 return (
                   <SidebarMenuItem key={item.path}>
                     <SidebarMenuButton asChild isActive={isActive}>
@@ -122,6 +140,33 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {filteredB2BItems.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>B2B Corporate</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {filteredB2BItems.map((item) => {
+                  const isActive = location === item.path || (item.path !== "/b2b" && location.startsWith(item.path));
+                  return (
+                    <SidebarMenuItem key={item.path}>
+                      <SidebarMenuButton asChild isActive={isActive}>
+                        <Link
+                          href={item.path}
+                          className="flex items-center gap-3"
+                          data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+                        >
+                          <item.icon className="h-4 w-4" />
+                          <span>{item.label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter className="p-4">

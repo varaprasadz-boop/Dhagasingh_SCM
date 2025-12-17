@@ -14,6 +14,18 @@ export const stockMovementTypeEnum = pgEnum("stock_movement_type", ["inward", "o
 export const deliveryStatusEnum = pgEnum("delivery_status", ["assigned", "out_for_delivery", "delivered", "payment_collected", "failed", "rto"]);
 export const userStatusEnum = pgEnum("user_status", ["active", "inactive"]);
 
+// B2B Enums
+export const b2bOrderStatusEnum = pgEnum("b2b_order_status", [
+  "order_received", "design_review", "client_approval", "production_scheduled",
+  "printing_in_progress", "quality_check", "packed", "dispatched", "delivered", "closed", "cancelled"
+]);
+export const b2bOrderPriorityEnum = pgEnum("b2b_order_priority", ["normal", "urgent"]);
+export const b2bPrintingTypeEnum = pgEnum("b2b_printing_type", ["dtg", "screen", "sublimation", "embroidery"]);
+export const b2bInvoiceTypeEnum = pgEnum("b2b_invoice_type", ["proforma", "tax"]);
+export const b2bInvoiceStatusEnum = pgEnum("b2b_invoice_status", ["draft", "sent", "paid", "cancelled"]);
+export const b2bPaymentStatusEnum = pgEnum("b2b_payment_status", ["not_paid", "advance_received", "partially_paid", "fully_paid", "overdue"]);
+export const b2bPaymentModeEnum = pgEnum("b2b_payment_mode", ["cash", "upi", "bank_transfer", "card", "cheque", "online_gateway"]);
+
 // Permissions table - stores all available permissions in the system
 export const permissions = pgTable("permissions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -302,6 +314,170 @@ export const settings = pgTable("settings", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// ============================================
+// B2B Module Tables
+// ============================================
+
+// B2B Clients table
+export const b2bClients = pgTable("b2b_clients", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  companyName: text("company_name").notNull(),
+  contactPerson: text("contact_person").notNull(),
+  email: text("email").notNull(),
+  phone: text("phone").notNull(),
+  alternatePhone: text("alternate_phone"),
+  industryType: text("industry_type"),
+  gstNumber: text("gst_number"),
+  panNumber: text("pan_number"),
+  billingAddress: text("billing_address"),
+  billingCity: text("billing_city"),
+  billingState: text("billing_state"),
+  billingZip: text("billing_zip"),
+  billingCountry: text("billing_country").default("India"),
+  shippingAddress: text("shipping_address"),
+  shippingCity: text("shipping_city"),
+  shippingState: text("shipping_state"),
+  shippingZip: text("shipping_zip"),
+  shippingCountry: text("shipping_country").default("India"),
+  notes: text("notes"),
+  status: userStatusEnum("status").default("active").notNull(),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// B2B Orders table
+export const b2bOrders = pgTable("b2b_orders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderNumber: text("order_number").notNull().unique(),
+  clientId: varchar("client_id").notNull().references(() => b2bClients.id),
+  eventType: text("event_type"),
+  deliveryAddress: text("delivery_address").notNull(),
+  deliveryCity: text("delivery_city"),
+  deliveryState: text("delivery_state"),
+  deliveryZip: text("delivery_zip"),
+  deliveryCountry: text("delivery_country").default("India"),
+  requiredDeliveryDate: timestamp("required_delivery_date"),
+  priority: b2bOrderPriorityEnum("priority").default("normal").notNull(),
+  status: b2bOrderStatusEnum("status").default("order_received").notNull(),
+  subtotal: decimal("subtotal", { precision: 10, scale: 2 }).default("0").notNull(),
+  printingCost: decimal("printing_cost", { precision: 10, scale: 2 }).default("0").notNull(),
+  designCharges: decimal("design_charges", { precision: 10, scale: 2 }).default("0").notNull(),
+  discount: decimal("discount", { precision: 10, scale: 2 }).default("0").notNull(),
+  taxRate: decimal("tax_rate", { precision: 5, scale: 2 }).default("18").notNull(),
+  taxAmount: decimal("tax_amount", { precision: 10, scale: 2 }).default("0").notNull(),
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).default("0").notNull(),
+  paymentStatus: b2bPaymentStatusEnum("payment_status").default("not_paid").notNull(),
+  amountReceived: decimal("amount_received", { precision: 10, scale: 2 }).default("0").notNull(),
+  balancePending: decimal("balance_pending", { precision: 10, scale: 2 }).default("0").notNull(),
+  specialInstructions: text("special_instructions"),
+  internalNotes: text("internal_notes"),
+  cancellationReason: text("cancellation_reason"),
+  delayReason: text("delay_reason"),
+  courierPartnerId: varchar("courier_partner_id").references(() => courierPartners.id),
+  awbNumber: text("awb_number"),
+  dispatchDate: timestamp("dispatch_date"),
+  deliveryDate: timestamp("delivery_date"),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// B2B Order Items (products with customization)
+export const b2bOrderItems = pgTable("b2b_order_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull().references(() => b2bOrders.id, { onDelete: "cascade" }),
+  productId: varchar("product_id").references(() => products.id),
+  apparelType: text("apparel_type").notNull(),
+  color: text("color").notNull(),
+  fabric: text("fabric"),
+  printingType: b2bPrintingTypeEnum("printing_type").notNull(),
+  printPlacement: text("print_placement"),
+  sizeBreakup: jsonb("size_breakup").notNull(),
+  totalQuantity: integer("total_quantity").notNull(),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+  printingCostPerUnit: decimal("printing_cost_per_unit", { precision: 10, scale: 2 }).default("0").notNull(),
+  totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
+  specialInstructions: text("special_instructions"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// B2B Order Artwork files
+export const b2bOrderArtwork = pgTable("b2b_order_artwork", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull().references(() => b2bOrders.id, { onDelete: "cascade" }),
+  orderItemId: varchar("order_item_id").references(() => b2bOrderItems.id, { onDelete: "cascade" }),
+  fileName: text("file_name").notNull(),
+  fileUrl: text("file_url").notNull(),
+  fileType: text("file_type"),
+  fileSize: integer("file_size"),
+  description: text("description"),
+  uploadedBy: varchar("uploaded_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// B2B Order Status History
+export const b2bOrderStatusHistory = pgTable("b2b_order_status_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull().references(() => b2bOrders.id, { onDelete: "cascade" }),
+  status: b2bOrderStatusEnum("status").notNull(),
+  comment: text("comment"),
+  changedBy: varchar("changed_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// B2B Invoices
+export const b2bInvoices = pgTable("b2b_invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  invoiceNumber: text("invoice_number").notNull().unique(),
+  orderId: varchar("order_id").notNull().references(() => b2bOrders.id),
+  clientId: varchar("client_id").notNull().references(() => b2bClients.id),
+  invoiceType: b2bInvoiceTypeEnum("invoice_type").notNull(),
+  invoiceDate: timestamp("invoice_date").defaultNow().notNull(),
+  dueDate: timestamp("due_date"),
+  subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
+  taxRate: decimal("tax_rate", { precision: 5, scale: 2 }).default("18").notNull(),
+  taxAmount: decimal("tax_amount", { precision: 10, scale: 2 }).notNull(),
+  discount: decimal("discount", { precision: 10, scale: 2 }).default("0").notNull(),
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
+  status: b2bInvoiceStatusEnum("status").default("draft").notNull(),
+  pdfUrl: text("pdf_url"),
+  notes: text("notes"),
+  version: integer("version").default(1).notNull(),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// B2B Payment Milestones (configurable payment schedule)
+export const b2bPaymentMilestones = pgTable("b2b_payment_milestones", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull().references(() => b2bOrders.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  percentage: decimal("percentage", { precision: 5, scale: 2 }).notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  dueDate: timestamp("due_date"),
+  isPaid: boolean("is_paid").default(false).notNull(),
+  paidAt: timestamp("paid_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// B2B Payments
+export const b2bPayments = pgTable("b2b_payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull().references(() => b2bOrders.id, { onDelete: "cascade" }),
+  invoiceId: varchar("invoice_id").references(() => b2bInvoices.id),
+  milestoneId: varchar("milestone_id").references(() => b2bPaymentMilestones.id),
+  paymentDate: timestamp("payment_date").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  paymentMode: b2bPaymentModeEnum("payment_mode").notNull(),
+  transactionRef: text("transaction_ref"),
+  proofUrl: text("proof_url"),
+  remarks: text("remarks"),
+  recordedBy: varchar("recorded_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Relations
 export const rolesRelations = relations(roles, ({ many }) => ({
   rolePermissions: many(rolePermissions),
@@ -425,6 +601,118 @@ export const stockMovementsRelations = relations(stockMovements, ({ one }) => ({
   }),
 }));
 
+// B2B Relations
+export const b2bClientsRelations = relations(b2bClients, ({ one, many }) => ({
+  orders: many(b2bOrders),
+  invoices: many(b2bInvoices),
+  createdByUser: one(users, {
+    fields: [b2bClients.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const b2bOrdersRelations = relations(b2bOrders, ({ one, many }) => ({
+  client: one(b2bClients, {
+    fields: [b2bOrders.clientId],
+    references: [b2bClients.id],
+  }),
+  items: many(b2bOrderItems),
+  artwork: many(b2bOrderArtwork),
+  statusHistory: many(b2bOrderStatusHistory),
+  invoices: many(b2bInvoices),
+  payments: many(b2bPayments),
+  milestones: many(b2bPaymentMilestones),
+  courierPartner: one(courierPartners, {
+    fields: [b2bOrders.courierPartnerId],
+    references: [courierPartners.id],
+  }),
+  createdByUser: one(users, {
+    fields: [b2bOrders.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const b2bOrderItemsRelations = relations(b2bOrderItems, ({ one, many }) => ({
+  order: one(b2bOrders, {
+    fields: [b2bOrderItems.orderId],
+    references: [b2bOrders.id],
+  }),
+  product: one(products, {
+    fields: [b2bOrderItems.productId],
+    references: [products.id],
+  }),
+  artwork: many(b2bOrderArtwork),
+}));
+
+export const b2bOrderArtworkRelations = relations(b2bOrderArtwork, ({ one }) => ({
+  order: one(b2bOrders, {
+    fields: [b2bOrderArtwork.orderId],
+    references: [b2bOrders.id],
+  }),
+  orderItem: one(b2bOrderItems, {
+    fields: [b2bOrderArtwork.orderItemId],
+    references: [b2bOrderItems.id],
+  }),
+  uploadedByUser: one(users, {
+    fields: [b2bOrderArtwork.uploadedBy],
+    references: [users.id],
+  }),
+}));
+
+export const b2bOrderStatusHistoryRelations = relations(b2bOrderStatusHistory, ({ one }) => ({
+  order: one(b2bOrders, {
+    fields: [b2bOrderStatusHistory.orderId],
+    references: [b2bOrders.id],
+  }),
+  changedByUser: one(users, {
+    fields: [b2bOrderStatusHistory.changedBy],
+    references: [users.id],
+  }),
+}));
+
+export const b2bInvoicesRelations = relations(b2bInvoices, ({ one, many }) => ({
+  order: one(b2bOrders, {
+    fields: [b2bInvoices.orderId],
+    references: [b2bOrders.id],
+  }),
+  client: one(b2bClients, {
+    fields: [b2bInvoices.clientId],
+    references: [b2bClients.id],
+  }),
+  payments: many(b2bPayments),
+  createdByUser: one(users, {
+    fields: [b2bInvoices.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const b2bPaymentMilestonesRelations = relations(b2bPaymentMilestones, ({ one, many }) => ({
+  order: one(b2bOrders, {
+    fields: [b2bPaymentMilestones.orderId],
+    references: [b2bOrders.id],
+  }),
+  payments: many(b2bPayments),
+}));
+
+export const b2bPaymentsRelations = relations(b2bPayments, ({ one }) => ({
+  order: one(b2bOrders, {
+    fields: [b2bPayments.orderId],
+    references: [b2bOrders.id],
+  }),
+  invoice: one(b2bInvoices, {
+    fields: [b2bPayments.invoiceId],
+    references: [b2bInvoices.id],
+  }),
+  milestone: one(b2bPaymentMilestones, {
+    fields: [b2bPayments.milestoneId],
+    references: [b2bPaymentMilestones.id],
+  }),
+  recordedByUser: one(users, {
+    fields: [b2bPayments.recordedBy],
+    references: [users.id],
+  }),
+}));
+
 // Insert schemas
 export const insertPermissionSchema = createInsertSchema(permissions).omit({ id: true, createdAt: true });
 export const insertRoleSchema = createInsertSchema(roles).omit({ id: true, createdAt: true, updatedAt: true });
@@ -445,6 +733,16 @@ export const insertDeliveryEventSchema = createInsertSchema(deliveryEvents).omit
 export const insertBulkUploadJobSchema = createInsertSchema(bulkUploadJobs).omit({ id: true, createdAt: true, completedAt: true });
 export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true, createdAt: true });
 export const insertSettingSchema = createInsertSchema(settings).omit({ id: true, updatedAt: true });
+
+// B2B Insert Schemas
+export const insertB2BClientSchema = createInsertSchema(b2bClients).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertB2BOrderSchema = createInsertSchema(b2bOrders).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertB2BOrderItemSchema = createInsertSchema(b2bOrderItems).omit({ id: true, createdAt: true });
+export const insertB2BOrderArtworkSchema = createInsertSchema(b2bOrderArtwork).omit({ id: true, createdAt: true });
+export const insertB2BOrderStatusHistorySchema = createInsertSchema(b2bOrderStatusHistory).omit({ id: true, createdAt: true });
+export const insertB2BInvoiceSchema = createInsertSchema(b2bInvoices).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertB2BPaymentMilestoneSchema = createInsertSchema(b2bPaymentMilestones).omit({ id: true, createdAt: true });
+export const insertB2BPaymentSchema = createInsertSchema(b2bPayments).omit({ id: true, createdAt: true });
 
 // Types
 export type Permission = typeof permissions.$inferSelect;
@@ -486,6 +784,24 @@ export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type Setting = typeof settings.$inferSelect;
 export type InsertSetting = z.infer<typeof insertSettingSchema>;
 
+// B2B Types
+export type B2BClient = typeof b2bClients.$inferSelect;
+export type InsertB2BClient = z.infer<typeof insertB2BClientSchema>;
+export type B2BOrder = typeof b2bOrders.$inferSelect;
+export type InsertB2BOrder = z.infer<typeof insertB2BOrderSchema>;
+export type B2BOrderItem = typeof b2bOrderItems.$inferSelect;
+export type InsertB2BOrderItem = z.infer<typeof insertB2BOrderItemSchema>;
+export type B2BOrderArtwork = typeof b2bOrderArtwork.$inferSelect;
+export type InsertB2BOrderArtwork = z.infer<typeof insertB2BOrderArtworkSchema>;
+export type B2BOrderStatusHistory = typeof b2bOrderStatusHistory.$inferSelect;
+export type InsertB2BOrderStatusHistory = z.infer<typeof insertB2BOrderStatusHistorySchema>;
+export type B2BInvoice = typeof b2bInvoices.$inferSelect;
+export type InsertB2BInvoice = z.infer<typeof insertB2BInvoiceSchema>;
+export type B2BPaymentMilestone = typeof b2bPaymentMilestones.$inferSelect;
+export type InsertB2BPaymentMilestone = z.infer<typeof insertB2BPaymentMilestoneSchema>;
+export type B2BPayment = typeof b2bPayments.$inferSelect;
+export type InsertB2BPayment = z.infer<typeof insertB2BPaymentSchema>;
+
 // Extended types with relations
 export type RoleWithPermissions = Role & {
   rolePermissions: (RolePermission & { permission: Permission })[];
@@ -515,6 +831,22 @@ export type InternalDeliveryWithDetails = InternalDelivery & {
   order: Order;
   assignedUser: User;
   events: DeliveryEvent[];
+};
+
+// B2B Extended Types
+export type B2BClientWithOrders = B2BClient & {
+  orders: B2BOrder[];
+};
+
+export type B2BOrderWithDetails = B2BOrder & {
+  client: B2BClient;
+  items: B2BOrderItem[];
+  artwork: B2BOrderArtwork[];
+  statusHistory: B2BOrderStatusHistory[];
+  invoices: B2BInvoice[];
+  payments: B2BPayment[];
+  milestones: B2BPaymentMilestone[];
+  courierPartner?: CourierPartner | null;
 };
 
 // All available permissions in the system
@@ -579,6 +911,20 @@ export const PERMISSION_CODES = {
   // Reports
   VIEW_REPORTS: "view_reports",
   EXPORT_REPORTS: "export_reports",
+  
+  // B2B Module
+  VIEW_B2B_CLIENTS: "view_b2b_clients",
+  MANAGE_B2B_CLIENTS: "manage_b2b_clients",
+  VIEW_B2B_ORDERS: "view_b2b_orders",
+  CREATE_B2B_ORDERS: "create_b2b_orders",
+  EDIT_B2B_ORDERS: "edit_b2b_orders",
+  DELETE_B2B_ORDERS: "delete_b2b_orders",
+  UPDATE_B2B_ORDER_STATUS: "update_b2b_order_status",
+  VIEW_B2B_INVOICES: "view_b2b_invoices",
+  MANAGE_B2B_INVOICES: "manage_b2b_invoices",
+  VIEW_B2B_PAYMENTS: "view_b2b_payments",
+  MANAGE_B2B_PAYMENTS: "manage_b2b_payments",
+  VIEW_B2B_DASHBOARD: "view_b2b_dashboard",
 } as const;
 
 export type PermissionCode = typeof PERMISSION_CODES[keyof typeof PERMISSION_CODES];

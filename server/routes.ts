@@ -1779,5 +1779,281 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== B2B Routes ====================
+  
+  // B2B Clients
+  app.get("/api/b2b/clients", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_CLIENTS), async (req, res) => {
+    try {
+      const clients = await storage.getB2BClients();
+      res.json(clients);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch clients" });
+    }
+  });
+
+  app.get("/api/b2b/clients/:id", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_CLIENTS), async (req, res) => {
+    try {
+      const client = await storage.getB2BClientById(req.params.id);
+      if (!client) {
+        return res.status(404).json({ error: "Client not found" });
+      }
+      res.json(client);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch client" });
+    }
+  });
+
+  app.post("/api/b2b/clients", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_CLIENTS), async (req, res) => {
+    try {
+      const client = await storage.createB2BClient(req.body);
+      res.status(201).json(client);
+    } catch (error) {
+      console.error("Error creating client:", error);
+      res.status(500).json({ error: "Failed to create client" });
+    }
+  });
+
+  app.patch("/api/b2b/clients/:id", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_CLIENTS), async (req, res) => {
+    try {
+      const client = await storage.updateB2BClient(req.params.id, req.body);
+      if (!client) {
+        return res.status(404).json({ error: "Client not found" });
+      }
+      res.json(client);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update client" });
+    }
+  });
+
+  app.delete("/api/b2b/clients/:id", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_CLIENTS), async (req, res) => {
+    try {
+      await storage.deleteB2BClient(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete client" });
+    }
+  });
+
+  // B2B Orders
+  app.get("/api/b2b/orders", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_ORDERS), async (req, res) => {
+    try {
+      const filters: any = {};
+      if (req.query.status) filters.status = req.query.status as string;
+      if (req.query.paymentStatus) filters.paymentStatus = req.query.paymentStatus as string;
+      if (req.query.clientId) filters.clientId = req.query.clientId as string;
+      if (req.query.priority) filters.priority = req.query.priority as string;
+      if (req.query.search) filters.search = req.query.search as string;
+      
+      const orders = await storage.getB2BOrders(filters);
+      res.json(orders);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch orders" });
+    }
+  });
+
+  app.get("/api/b2b/orders/:id", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_ORDERS), async (req, res) => {
+    try {
+      const order = await storage.getB2BOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      res.json(order);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch order" });
+    }
+  });
+
+  app.post("/api/b2b/orders", authMiddleware, requirePermission(PERMISSION_CODES.CREATE_B2B_ORDERS), async (req, res) => {
+    try {
+      const { items, ...orderData } = req.body;
+      const order = await storage.createB2BOrder(
+        { ...orderData, createdBy: req.user!.id },
+        items || []
+      );
+      res.status(201).json(order);
+    } catch (error) {
+      console.error("Error creating B2B order:", error);
+      res.status(500).json({ error: "Failed to create order" });
+    }
+  });
+
+  app.patch("/api/b2b/orders/:id", authMiddleware, requirePermission(PERMISSION_CODES.EDIT_B2B_ORDERS), async (req, res) => {
+    try {
+      const order = await storage.updateB2BOrder(req.params.id, req.body);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      res.json(order);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update order" });
+    }
+  });
+
+  app.post("/api/b2b/orders/:id/status", authMiddleware, requirePermission(PERMISSION_CODES.UPDATE_B2B_ORDER_STATUS), async (req, res) => {
+    try {
+      const { status, comment } = req.body;
+      const order = await storage.updateB2BOrderStatus(req.params.id, status, comment, req.user!.id);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      res.json(order);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update order status" });
+    }
+  });
+
+  app.delete("/api/b2b/orders/:id", authMiddleware, requirePermission(PERMISSION_CODES.DELETE_B2B_ORDERS), async (req, res) => {
+    try {
+      await storage.deleteB2BOrder(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete order" });
+    }
+  });
+
+  // B2B Order Artwork
+  app.post("/api/b2b/orders/:id/artwork", authMiddleware, requirePermission(PERMISSION_CODES.EDIT_B2B_ORDERS), async (req, res) => {
+    try {
+      const artwork = await storage.addB2BOrderArtwork({
+        ...req.body,
+        orderId: req.params.id,
+        uploadedBy: req.user!.id,
+      });
+      res.status(201).json(artwork);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to add artwork" });
+    }
+  });
+
+  app.delete("/api/b2b/artwork/:id", authMiddleware, requirePermission(PERMISSION_CODES.EDIT_B2B_ORDERS), async (req, res) => {
+    try {
+      await storage.deleteB2BOrderArtwork(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete artwork" });
+    }
+  });
+
+  // B2B Invoices
+  app.get("/api/b2b/invoices", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_INVOICES), async (req, res) => {
+    try {
+      const filters: any = {};
+      if (req.query.status) filters.status = req.query.status as string;
+      if (req.query.invoiceType) filters.invoiceType = req.query.invoiceType as string;
+      if (req.query.clientId) filters.clientId = req.query.clientId as string;
+      if (req.query.orderId) filters.orderId = req.query.orderId as string;
+      
+      const invoices = await storage.getB2BInvoices(filters);
+      res.json(invoices);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch invoices" });
+    }
+  });
+
+  app.get("/api/b2b/invoices/:id", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_INVOICES), async (req, res) => {
+    try {
+      const invoice = await storage.getB2BInvoiceById(req.params.id);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch invoice" });
+    }
+  });
+
+  app.post("/api/b2b/invoices", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_INVOICES), async (req, res) => {
+    try {
+      const invoice = await storage.createB2BInvoice({
+        ...req.body,
+        createdBy: req.user!.id,
+      });
+      res.status(201).json(invoice);
+    } catch (error) {
+      console.error("Error creating invoice:", error);
+      res.status(500).json({ error: "Failed to create invoice" });
+    }
+  });
+
+  app.patch("/api/b2b/invoices/:id", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_INVOICES), async (req, res) => {
+    try {
+      const invoice = await storage.updateB2BInvoice(req.params.id, req.body);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update invoice" });
+    }
+  });
+
+  // B2B Payments
+  app.get("/api/b2b/payments", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_PAYMENTS), async (req, res) => {
+    try {
+      const orderId = req.query.orderId as string | undefined;
+      const payments = await storage.getB2BPayments(orderId);
+      res.json(payments);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch payments" });
+    }
+  });
+
+  app.post("/api/b2b/payments", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_PAYMENTS), async (req, res) => {
+    try {
+      const payment = await storage.createB2BPayment({
+        ...req.body,
+        recordedBy: req.user!.id,
+      });
+      res.status(201).json(payment);
+    } catch (error) {
+      console.error("Error creating payment:", error);
+      res.status(500).json({ error: "Failed to create payment" });
+    }
+  });
+
+  // B2B Payment Milestones
+  app.get("/api/b2b/orders/:id/milestones", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_PAYMENTS), async (req, res) => {
+    try {
+      const milestones = await storage.getB2BPaymentMilestones(req.params.id);
+      res.json(milestones);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch milestones" });
+    }
+  });
+
+  app.post("/api/b2b/orders/:id/milestones", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_PAYMENTS), async (req, res) => {
+    try {
+      const milestone = await storage.createB2BPaymentMilestone({
+        ...req.body,
+        orderId: req.params.id,
+      });
+      res.status(201).json(milestone);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create milestone" });
+    }
+  });
+
+  app.patch("/api/b2b/milestones/:id", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_PAYMENTS), async (req, res) => {
+    try {
+      const milestone = await storage.updateB2BPaymentMilestone(req.params.id, req.body);
+      if (!milestone) {
+        return res.status(404).json({ error: "Milestone not found" });
+      }
+      res.json(milestone);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update milestone" });
+    }
+  });
+
+  // B2B Dashboard
+  app.get("/api/b2b/dashboard", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_DASHBOARD), async (req, res) => {
+    try {
+      const stats = await storage.getB2BDashboardStats();
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch dashboard stats" });
+    }
+  });
+
   return httpServer;
 }

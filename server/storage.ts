@@ -7,6 +7,8 @@ import {
   orders, orderItems, orderStatusHistory, stockMovements,
   complaints, complaintTimeline, internalDeliveries, deliveryEvents,
   bulkUploadJobs, auditLogs, settings,
+  b2bClients, b2bOrders, b2bOrderItems, b2bOrderArtwork, b2bOrderStatusHistory,
+  b2bInvoices, b2bPaymentMilestones, b2bPayments,
   type User, type InsertUser, type Role, type InsertRole,
   type Permission, type InsertPermission, type RolePermission, type InsertRolePermission,
   type Supplier, type InsertSupplier, type Product, type InsertProduct,
@@ -18,6 +20,11 @@ import {
   type AuditLog, type InsertAuditLog, type Setting, type InsertSetting,
   type UserWithRole, type RoleWithPermissions, type ProductWithVariants,
   type OrderWithItems, type ComplaintWithTimeline, type InternalDeliveryWithDetails,
+  type B2BClient, type InsertB2BClient, type B2BOrder, type InsertB2BOrder,
+  type B2BOrderItem, type InsertB2BOrderItem, type B2BOrderArtwork, type InsertB2BOrderArtwork,
+  type B2BOrderStatusHistory, type InsertB2BOrderStatusHistory,
+  type B2BInvoice, type InsertB2BInvoice, type B2BPaymentMilestone, type InsertB2BPaymentMilestone,
+  type B2BPayment, type InsertB2BPayment, type B2BOrderWithDetails,
   PERMISSION_CODES
 } from "@shared/schema";
 import { hash, compare } from "bcrypt";
@@ -138,6 +145,44 @@ export interface IStorage {
   
   // Seed data
   seedDefaultData(): Promise<void>;
+  
+  // B2B Clients
+  getB2BClients(): Promise<B2BClient[]>;
+  getB2BClientById(id: string): Promise<B2BClient | undefined>;
+  createB2BClient(client: InsertB2BClient): Promise<B2BClient>;
+  updateB2BClient(id: string, client: Partial<InsertB2BClient>): Promise<B2BClient | undefined>;
+  deleteB2BClient(id: string): Promise<boolean>;
+  
+  // B2B Orders
+  getB2BOrders(filters?: B2BOrderFilters): Promise<B2BOrderWithDetails[]>;
+  getB2BOrderById(id: string): Promise<B2BOrderWithDetails | undefined>;
+  getB2BOrderByNumber(orderNumber: string): Promise<B2BOrderWithDetails | undefined>;
+  createB2BOrder(order: InsertB2BOrder, items: InsertB2BOrderItem[]): Promise<B2BOrderWithDetails>;
+  updateB2BOrder(id: string, order: Partial<InsertB2BOrder>): Promise<B2BOrder | undefined>;
+  updateB2BOrderStatus(id: string, status: B2BOrder["status"], comment?: string, userId?: string): Promise<B2BOrder | undefined>;
+  deleteB2BOrder(id: string): Promise<boolean>;
+  
+  // B2B Order Artwork
+  addB2BOrderArtwork(artwork: InsertB2BOrderArtwork): Promise<B2BOrderArtwork>;
+  deleteB2BOrderArtwork(id: string): Promise<boolean>;
+  
+  // B2B Invoices
+  getB2BInvoices(filters?: B2BInvoiceFilters): Promise<B2BInvoice[]>;
+  getB2BInvoiceById(id: string): Promise<B2BInvoice | undefined>;
+  createB2BInvoice(invoice: InsertB2BInvoice): Promise<B2BInvoice>;
+  updateB2BInvoice(id: string, invoice: Partial<InsertB2BInvoice>): Promise<B2BInvoice | undefined>;
+  
+  // B2B Payments
+  getB2BPayments(orderId?: string): Promise<B2BPayment[]>;
+  createB2BPayment(payment: InsertB2BPayment): Promise<B2BPayment>;
+  
+  // B2B Payment Milestones
+  getB2BPaymentMilestones(orderId: string): Promise<B2BPaymentMilestone[]>;
+  createB2BPaymentMilestone(milestone: InsertB2BPaymentMilestone): Promise<B2BPaymentMilestone>;
+  updateB2BPaymentMilestone(id: string, milestone: Partial<InsertB2BPaymentMilestone>): Promise<B2BPaymentMilestone | undefined>;
+  
+  // B2B Dashboard Stats
+  getB2BDashboardStats(): Promise<B2BDashboardStats>;
 }
 
 interface OrderFilters {
@@ -194,6 +239,38 @@ export interface BulkStatusUpdateResult {
   updatedOrders: Array<{ orderNumber: string; orderId: string; status: Order["status"] }>;
 }
 
+interface B2BOrderFilters {
+  status?: B2BOrder["status"];
+  paymentStatus?: B2BOrder["paymentStatus"];
+  clientId?: string;
+  priority?: B2BOrder["priority"];
+  fromDate?: Date;
+  toDate?: Date;
+  search?: string;
+}
+
+interface B2BInvoiceFilters {
+  status?: B2BInvoice["status"];
+  invoiceType?: B2BInvoice["invoiceType"];
+  clientId?: string;
+  orderId?: string;
+  fromDate?: Date;
+  toDate?: Date;
+}
+
+export interface B2BDashboardStats {
+  totalClients: number;
+  activeOrders: number;
+  totalOrders: number;
+  totalRevenue: number;
+  amountReceived: number;
+  amountPending: number;
+  ordersByStatus: Record<string, number>;
+  ordersByPaymentStatus: Record<string, number>;
+  recentOrders: B2BOrder[];
+  overduePayments: { orderId: string; orderNumber: string; amount: number; dueDate: Date }[];
+}
+
 class DatabaseStorage implements IStorage {
   // Permissions
   async getPermissions(): Promise<Permission[]> {
@@ -212,6 +289,16 @@ class DatabaseStorage implements IStorage {
       return result?.[0];
     } catch (error) {
       console.log(`Error getting permission ${code}:`, error);
+      return undefined;
+    }
+  }
+
+  async getPermissionById(id: string): Promise<Permission | undefined> {
+    try {
+      const result = await db.select().from(permissions).where(eq(permissions.id, id)).limit(1);
+      return result?.[0];
+    } catch (error) {
+      console.log(`Error getting permission ${id}:`, error);
       return undefined;
     }
   }
@@ -1308,6 +1395,368 @@ class DatabaseStorage implements IStorage {
     return created;
   }
 
+  // B2B Clients
+  async getB2BClients(): Promise<B2BClient[]> {
+    try {
+      const result = await db.select().from(b2bClients).orderBy(desc(b2bClients.createdAt));
+      return result || [];
+    } catch (error) {
+      console.error("Error fetching B2B clients:", error);
+      return [];
+    }
+  }
+
+  async getB2BClientById(id: string): Promise<B2BClient | undefined> {
+    try {
+      const result = await db.select().from(b2bClients).where(eq(b2bClients.id, id));
+      return result?.[0];
+    } catch (error) {
+      console.error("Error fetching B2B client:", error);
+      return undefined;
+    }
+  }
+
+  async createB2BClient(client: InsertB2BClient): Promise<B2BClient> {
+    const id = randomUUID();
+    await db.insert(b2bClients).values({ ...client, id });
+    const created = await this.getB2BClientById(id);
+    if (!created) throw new Error("Failed to create B2B client");
+    return created;
+  }
+
+  async updateB2BClient(id: string, client: Partial<InsertB2BClient>): Promise<B2BClient | undefined> {
+    await db.update(b2bClients).set({ ...client, updatedAt: new Date() }).where(eq(b2bClients.id, id));
+    return this.getB2BClientById(id);
+  }
+
+  async deleteB2BClient(id: string): Promise<boolean> {
+    const result = await db.delete(b2bClients).where(eq(b2bClients.id, id));
+    return true;
+  }
+
+  // B2B Orders
+  async getB2BOrders(filters?: B2BOrderFilters): Promise<B2BOrderWithDetails[]> {
+    try {
+      const conditions: any[] = [];
+      
+      if (filters?.status) conditions.push(eq(b2bOrders.status, filters.status));
+      if (filters?.paymentStatus) conditions.push(eq(b2bOrders.paymentStatus, filters.paymentStatus));
+      if (filters?.clientId) conditions.push(eq(b2bOrders.clientId, filters.clientId));
+      if (filters?.priority) conditions.push(eq(b2bOrders.priority, filters.priority));
+      if (filters?.fromDate) conditions.push(gte(b2bOrders.createdAt, filters.fromDate));
+      if (filters?.toDate) conditions.push(lte(b2bOrders.createdAt, filters.toDate));
+      if (filters?.search) {
+        conditions.push(or(
+          like(b2bOrders.orderNumber, `%${filters.search}%`)
+        ));
+      }
+
+      const result = await db.query.b2bOrders.findMany({
+        where: conditions.length > 0 ? and(...conditions) : undefined,
+        with: {
+          client: true,
+          items: true,
+          artwork: true,
+          statusHistory: true,
+          invoices: true,
+          payments: true,
+          milestones: true,
+          courierPartner: true,
+        },
+        orderBy: [desc(b2bOrders.createdAt)],
+      });
+      return result || [];
+    } catch (error) {
+      console.error("Error fetching B2B orders:", error);
+      return [];
+    }
+  }
+
+  async getB2BOrderById(id: string): Promise<B2BOrderWithDetails | undefined> {
+    try {
+      const result = await db.query.b2bOrders.findFirst({
+        where: eq(b2bOrders.id, id),
+        with: {
+          client: true,
+          items: true,
+          artwork: true,
+          statusHistory: true,
+          invoices: true,
+          payments: true,
+          milestones: true,
+          courierPartner: true,
+        },
+      });
+      return result;
+    } catch (error) {
+      console.error("Error fetching B2B order:", error);
+      return undefined;
+    }
+  }
+
+  async getB2BOrderByNumber(orderNumber: string): Promise<B2BOrderWithDetails | undefined> {
+    try {
+      const result = await db.query.b2bOrders.findFirst({
+        where: eq(b2bOrders.orderNumber, orderNumber),
+        with: {
+          client: true,
+          items: true,
+          artwork: true,
+          statusHistory: true,
+          invoices: true,
+          payments: true,
+          milestones: true,
+          courierPartner: true,
+        },
+      });
+      return result;
+    } catch (error) {
+      console.error("Error fetching B2B order by number:", error);
+      return undefined;
+    }
+  }
+
+  async createB2BOrder(order: InsertB2BOrder, items: InsertB2BOrderItem[]): Promise<B2BOrderWithDetails> {
+    const orderId = randomUUID();
+    const orderNumber = `B2B-${Date.now().toString(36).toUpperCase()}`;
+    
+    await db.insert(b2bOrders).values({ 
+      ...order, 
+      id: orderId, 
+      orderNumber,
+      balancePending: order.totalAmount || "0"
+    });
+    
+    for (const item of items) {
+      const itemId = randomUUID();
+      await db.insert(b2bOrderItems).values({ ...item, id: itemId, orderId });
+    }
+    
+    await db.insert(b2bOrderStatusHistory).values({
+      id: randomUUID(),
+      orderId,
+      status: "order_received",
+      comment: "Order created",
+      changedBy: order.createdBy,
+    });
+    
+    const created = await this.getB2BOrderById(orderId);
+    if (!created) throw new Error("Failed to create B2B order");
+    return created;
+  }
+
+  async updateB2BOrder(id: string, order: Partial<InsertB2BOrder>): Promise<B2BOrder | undefined> {
+    await db.update(b2bOrders).set({ ...order, updatedAt: new Date() }).where(eq(b2bOrders.id, id));
+    const result = await db.select().from(b2bOrders).where(eq(b2bOrders.id, id));
+    return result?.[0];
+  }
+
+  async updateB2BOrderStatus(id: string, status: B2BOrder["status"], comment?: string, userId?: string): Promise<B2BOrder | undefined> {
+    await db.update(b2bOrders).set({ status, updatedAt: new Date() }).where(eq(b2bOrders.id, id));
+    
+    await db.insert(b2bOrderStatusHistory).values({
+      id: randomUUID(),
+      orderId: id,
+      status,
+      comment,
+      changedBy: userId,
+    });
+    
+    const result = await db.select().from(b2bOrders).where(eq(b2bOrders.id, id));
+    return result?.[0];
+  }
+
+  async deleteB2BOrder(id: string): Promise<boolean> {
+    await db.delete(b2bOrders).where(eq(b2bOrders.id, id));
+    return true;
+  }
+
+  // B2B Order Artwork
+  async addB2BOrderArtwork(artwork: InsertB2BOrderArtwork): Promise<B2BOrderArtwork> {
+    const id = randomUUID();
+    await db.insert(b2bOrderArtwork).values({ ...artwork, id });
+    const result = await db.select().from(b2bOrderArtwork).where(eq(b2bOrderArtwork.id, id));
+    if (!result?.[0]) throw new Error("Failed to create artwork");
+    return result[0];
+  }
+
+  async deleteB2BOrderArtwork(id: string): Promise<boolean> {
+    await db.delete(b2bOrderArtwork).where(eq(b2bOrderArtwork.id, id));
+    return true;
+  }
+
+  // B2B Invoices
+  async getB2BInvoices(filters?: B2BInvoiceFilters): Promise<B2BInvoice[]> {
+    try {
+      const conditions: any[] = [];
+      
+      if (filters?.status) conditions.push(eq(b2bInvoices.status, filters.status));
+      if (filters?.invoiceType) conditions.push(eq(b2bInvoices.invoiceType, filters.invoiceType));
+      if (filters?.clientId) conditions.push(eq(b2bInvoices.clientId, filters.clientId));
+      if (filters?.orderId) conditions.push(eq(b2bInvoices.orderId, filters.orderId));
+      if (filters?.fromDate) conditions.push(gte(b2bInvoices.invoiceDate, filters.fromDate));
+      if (filters?.toDate) conditions.push(lte(b2bInvoices.invoiceDate, filters.toDate));
+
+      const result = await db.select().from(b2bInvoices)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(b2bInvoices.invoiceDate));
+      return result || [];
+    } catch (error) {
+      console.error("Error fetching B2B invoices:", error);
+      return [];
+    }
+  }
+
+  async getB2BInvoiceById(id: string): Promise<B2BInvoice | undefined> {
+    try {
+      const result = await db.select().from(b2bInvoices).where(eq(b2bInvoices.id, id));
+      return result?.[0];
+    } catch (error) {
+      console.error("Error fetching B2B invoice:", error);
+      return undefined;
+    }
+  }
+
+  async createB2BInvoice(invoice: InsertB2BInvoice): Promise<B2BInvoice> {
+    const id = randomUUID();
+    const invoiceNumber = `INV-${Date.now().toString(36).toUpperCase()}`;
+    await db.insert(b2bInvoices).values({ ...invoice, id, invoiceNumber });
+    const created = await this.getB2BInvoiceById(id);
+    if (!created) throw new Error("Failed to create B2B invoice");
+    return created;
+  }
+
+  async updateB2BInvoice(id: string, invoice: Partial<InsertB2BInvoice>): Promise<B2BInvoice | undefined> {
+    await db.update(b2bInvoices).set({ ...invoice, updatedAt: new Date() }).where(eq(b2bInvoices.id, id));
+    return this.getB2BInvoiceById(id);
+  }
+
+  // B2B Payments
+  async getB2BPayments(orderId?: string): Promise<B2BPayment[]> {
+    try {
+      if (orderId) {
+        const result = await db.select().from(b2bPayments).where(eq(b2bPayments.orderId, orderId)).orderBy(desc(b2bPayments.paymentDate));
+        return result || [];
+      }
+      const result = await db.select().from(b2bPayments).orderBy(desc(b2bPayments.paymentDate));
+      return result || [];
+    } catch (error) {
+      console.error("Error fetching B2B payments:", error);
+      return [];
+    }
+  }
+
+  async createB2BPayment(payment: InsertB2BPayment): Promise<B2BPayment> {
+    const id = randomUUID();
+    await db.insert(b2bPayments).values({ ...payment, id });
+    
+    const order = await this.getB2BOrderById(payment.orderId);
+    if (order) {
+      const currentReceived = parseFloat(order.amountReceived as string) || 0;
+      const paymentAmount = parseFloat(payment.amount as string) || 0;
+      const newReceived = currentReceived + paymentAmount;
+      const totalAmount = parseFloat(order.totalAmount as string) || 0;
+      const newPending = totalAmount - newReceived;
+      
+      let newPaymentStatus: B2BOrder["paymentStatus"] = "not_paid";
+      if (newReceived >= totalAmount) {
+        newPaymentStatus = "fully_paid";
+      } else if (newReceived > 0 && newReceived < totalAmount * 0.5) {
+        newPaymentStatus = "advance_received";
+      } else if (newReceived >= totalAmount * 0.5) {
+        newPaymentStatus = "partially_paid";
+      }
+      
+      await db.update(b2bOrders).set({
+        amountReceived: newReceived.toString(),
+        balancePending: Math.max(0, newPending).toString(),
+        paymentStatus: newPaymentStatus,
+        updatedAt: new Date(),
+      }).where(eq(b2bOrders.id, order.id));
+    }
+    
+    const result = await db.select().from(b2bPayments).where(eq(b2bPayments.id, id));
+    if (!result?.[0]) throw new Error("Failed to create payment");
+    return result[0];
+  }
+
+  // B2B Payment Milestones
+  async getB2BPaymentMilestones(orderId: string): Promise<B2BPaymentMilestone[]> {
+    try {
+      const result = await db.select().from(b2bPaymentMilestones).where(eq(b2bPaymentMilestones.orderId, orderId)).orderBy(asc(b2bPaymentMilestones.dueDate));
+      return result || [];
+    } catch (error) {
+      console.error("Error fetching B2B payment milestones:", error);
+      return [];
+    }
+  }
+
+  async createB2BPaymentMilestone(milestone: InsertB2BPaymentMilestone): Promise<B2BPaymentMilestone> {
+    const id = randomUUID();
+    await db.insert(b2bPaymentMilestones).values({ ...milestone, id });
+    const result = await db.select().from(b2bPaymentMilestones).where(eq(b2bPaymentMilestones.id, id));
+    if (!result?.[0]) throw new Error("Failed to create milestone");
+    return result[0];
+  }
+
+  async updateB2BPaymentMilestone(id: string, milestone: Partial<InsertB2BPaymentMilestone>): Promise<B2BPaymentMilestone | undefined> {
+    await db.update(b2bPaymentMilestones).set(milestone).where(eq(b2bPaymentMilestones.id, id));
+    const result = await db.select().from(b2bPaymentMilestones).where(eq(b2bPaymentMilestones.id, id));
+    return result?.[0];
+  }
+
+  // B2B Dashboard Stats
+  async getB2BDashboardStats(): Promise<B2BDashboardStats> {
+    try {
+      const [clientCount] = await db.select({ count: count() }).from(b2bClients).where(eq(b2bClients.status, "active"));
+      const allOrders = await db.select().from(b2bOrders);
+      
+      const activeStatuses = ["order_received", "design_review", "client_approval", "production_scheduled", "printing_in_progress", "quality_check", "packed"];
+      const activeOrders = allOrders.filter(o => activeStatuses.includes(o.status));
+      
+      const totalRevenue = allOrders.reduce((sum, o) => sum + (parseFloat(o.totalAmount as string) || 0), 0);
+      const amountReceived = allOrders.reduce((sum, o) => sum + (parseFloat(o.amountReceived as string) || 0), 0);
+      const amountPending = allOrders.reduce((sum, o) => sum + (parseFloat(o.balancePending as string) || 0), 0);
+      
+      const ordersByStatus: Record<string, number> = {};
+      const ordersByPaymentStatus: Record<string, number> = {};
+      
+      for (const order of allOrders) {
+        ordersByStatus[order.status] = (ordersByStatus[order.status] || 0) + 1;
+        ordersByPaymentStatus[order.paymentStatus] = (ordersByPaymentStatus[order.paymentStatus] || 0) + 1;
+      }
+      
+      const recentOrders = allOrders.slice(0, 10);
+      
+      return {
+        totalClients: clientCount?.count || 0,
+        activeOrders: activeOrders.length,
+        totalOrders: allOrders.length,
+        totalRevenue,
+        amountReceived,
+        amountPending,
+        ordersByStatus,
+        ordersByPaymentStatus,
+        recentOrders,
+        overduePayments: [],
+      };
+    } catch (error) {
+      console.error("Error fetching B2B dashboard stats:", error);
+      return {
+        totalClients: 0,
+        activeOrders: 0,
+        totalOrders: 0,
+        totalRevenue: 0,
+        amountReceived: 0,
+        amountPending: 0,
+        ordersByStatus: {},
+        ordersByPaymentStatus: {},
+        recentOrders: [],
+        overduePayments: [],
+      };
+    }
+  }
+
   // Seed default data
   async seedDefaultData(): Promise<void> {
     try {
@@ -1358,6 +1807,18 @@ class DatabaseStorage implements IStorage {
       { code: "manage_courier_status", name: "Manage Courier Status", description: "Bulk update order statuses from courier data", module: "orders" },
       { code: "view_reports", name: "View Reports", description: "View reports", module: "reports" },
       { code: "export_reports", name: "Export Reports", description: "Export reports", module: "reports" },
+      { code: "view_b2b_clients", name: "View B2B Clients", description: "View B2B client list", module: "b2b" },
+      { code: "manage_b2b_clients", name: "Manage B2B Clients", description: "Add/edit B2B clients", module: "b2b" },
+      { code: "view_b2b_orders", name: "View B2B Orders", description: "View B2B order list", module: "b2b" },
+      { code: "create_b2b_orders", name: "Create B2B Orders", description: "Create new B2B orders", module: "b2b" },
+      { code: "edit_b2b_orders", name: "Edit B2B Orders", description: "Edit existing B2B orders", module: "b2b" },
+      { code: "delete_b2b_orders", name: "Delete B2B Orders", description: "Delete B2B orders", module: "b2b" },
+      { code: "update_b2b_order_status", name: "Update B2B Order Status", description: "Update B2B order workflow status", module: "b2b" },
+      { code: "view_b2b_invoices", name: "View B2B Invoices", description: "View B2B invoices", module: "b2b" },
+      { code: "manage_b2b_invoices", name: "Manage B2B Invoices", description: "Create/edit B2B invoices", module: "b2b" },
+      { code: "view_b2b_payments", name: "View B2B Payments", description: "View B2B payments", module: "b2b" },
+      { code: "manage_b2b_payments", name: "Manage B2B Payments", description: "Record B2B payments", module: "b2b" },
+      { code: "view_b2b_dashboard", name: "View B2B Dashboard", description: "View B2B dashboard", module: "b2b" },
     ];
 
     let existingPerms: Permission[] = [];
