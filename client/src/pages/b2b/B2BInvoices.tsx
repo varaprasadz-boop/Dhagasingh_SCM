@@ -36,14 +36,19 @@ import { Plus, Search, FileText, Calendar, DollarSign, Eye } from "lucide-react"
 import { format } from "date-fns";
 import type { B2BInvoice, B2BOrderWithDetails, B2BClient } from "@shared/schema";
 
+const optionalNumber = z.preprocess(
+  (val) => (val === "" || val === undefined ? undefined : val),
+  z.coerce.number().nonnegative().optional()
+);
+
 const invoiceFormSchema = z.object({
   orderId: z.string().min(1, "Order is required"),
   clientId: z.string().min(1, "Client is required"),
   invoiceType: z.enum(["proforma", "tax"]),
-  subtotal: z.string().min(1, "Subtotal is required"),
-  taxAmount: z.string().optional().or(z.literal("")),
-  discountAmount: z.string().optional().or(z.literal("")),
-  totalAmount: z.string().min(1, "Total is required"),
+  subtotal: z.coerce.number().positive("Subtotal must be greater than 0"),
+  taxAmount: optionalNumber,
+  discountAmount: optionalNumber,
+  totalAmount: z.coerce.number().positive("Total must be greater than 0"),
   dueDate: z.string().optional(),
   notes: z.string().optional().or(z.literal("")),
 });
@@ -89,10 +94,10 @@ export default function B2BInvoices() {
       orderId: "",
       clientId: "",
       invoiceType: "proforma",
-      subtotal: "",
-      taxAmount: "",
-      discountAmount: "",
-      totalAmount: "",
+      subtotal: 0,
+      taxAmount: undefined,
+      discountAmount: undefined,
+      totalAmount: 0,
       dueDate: "",
       notes: "",
     },

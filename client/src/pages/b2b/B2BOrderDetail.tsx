@@ -141,7 +141,7 @@ export default function B2BOrderDetail() {
     if (!paymentAmount) return;
     addPaymentMutation.mutate({
       orderId: params.id,
-      amount: paymentAmount,
+      amount: parseFloat(paymentAmount),
       paymentMethod,
       referenceNumber: paymentReference,
       paymentDate: new Date().toISOString(),

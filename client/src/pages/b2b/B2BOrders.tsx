@@ -45,7 +45,7 @@ const orderFormSchema = z.object({
   artworkStatus: z.enum(["pending", "received", "approved", "revision_needed"]),
   sizeBreakup: z.string().optional().or(z.literal("")),
   priority: z.enum(["normal", "urgent", "express"]),
-  totalAmount: z.string().min(1, "Total amount is required"),
+  totalAmount: z.coerce.number().positive("Total amount must be greater than 0"),
   expectedDeliveryDate: z.string().optional(),
   specialInstructions: z.string().optional().or(z.literal("")),
 });
@@ -117,7 +117,7 @@ export default function B2BOrders() {
       artworkStatus: "pending",
       sizeBreakup: "",
       priority: "normal",
-      totalAmount: "",
+      totalAmount: 0,
       expectedDeliveryDate: "",
       specialInstructions: "",
     },

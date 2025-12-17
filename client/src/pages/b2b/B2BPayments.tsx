@@ -38,7 +38,7 @@ import type { B2BPayment, B2BOrderWithDetails } from "@shared/schema";
 
 const paymentFormSchema = z.object({
   orderId: z.string().min(1, "Order is required"),
-  amount: z.string().min(1, "Amount is required"),
+  amount: z.coerce.number().positive("Amount must be greater than 0"),
   paymentMethod: z.enum(["cash", "bank_transfer", "upi", "cheque", "card"]),
   referenceNumber: z.string().optional().or(z.literal("")),
   paymentDate: z.string().min(1, "Payment date is required"),
@@ -80,7 +80,7 @@ export default function B2BPayments() {
     resolver: zodResolver(paymentFormSchema),
     defaultValues: {
       orderId: "",
-      amount: "",
+      amount: 0,
       paymentMethod: "bank_transfer",
       referenceNumber: "",
       paymentDate: new Date().toISOString().split("T")[0],
