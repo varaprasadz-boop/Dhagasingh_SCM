@@ -33,7 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Search, ShoppingCart, Calendar, User, DollarSign, Eye } from "lucide-react";
+import { Plus, Search, ShoppingCart, Calendar, User, DollarSign, Eye, ChevronDown } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import type { B2BOrderWithDetails, B2BClient } from "@shared/schema";
@@ -94,10 +94,13 @@ const paymentStatusColors: Record<string, string> = {
   fully_paid: "bg-green-100 text-green-800",
 };
 
+const ITEMS_PER_PAGE = 10;
+
 export default function B2BOrders() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
   const { toast } = useToast();
 
   const { data: orders, isLoading } = useQuery<B2BOrderWithDetails[]>({
@@ -133,8 +136,13 @@ export default function B2BOrders() {
       setIsDialogOpen(false);
       form.reset();
     },
-    onError: () => {
-      toast({ title: "Failed to create order", variant: "destructive" });
+    onError: (error: any) => {
+      const message = error?.message || "";
+      toast({ 
+        title: "Could not create order", 
+        description: message.includes("403") ? "You don't have permission to create orders for this client" : "Please check the form and try again",
+        variant: "destructive" 
+      });
     },
   });
 
@@ -394,7 +402,7 @@ export default function B2BOrders() {
 
       {filteredOrders && filteredOrders.length > 0 ? (
         <div className="space-y-4">
-          {filteredOrders.map((order) => (
+          {filteredOrders.slice(0, displayCount).map((order) => (
             <Card key={order.id} className="hover-elevate" data-testid={`order-card-${order.id}`}>
               <CardContent className="p-4">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -452,6 +460,25 @@ export default function B2BOrders() {
               </CardContent>
             </Card>
           ))}
+          
+          {filteredOrders.length > displayCount && (
+            <div className="flex justify-center pt-4">
+              <Button 
+                variant="outline" 
+                onClick={() => setDisplayCount(prev => prev + ITEMS_PER_PAGE)}
+                data-testid="button-load-more"
+              >
+                <ChevronDown className="h-4 w-4 mr-2" />
+                Show More ({filteredOrders.length - displayCount} remaining)
+              </Button>
+            </div>
+          )}
+          
+          {filteredOrders.length > ITEMS_PER_PAGE && displayCount > ITEMS_PER_PAGE && (
+            <p className="text-center text-sm text-muted-foreground">
+              Showing {Math.min(displayCount, filteredOrders.length)} of {filteredOrders.length} orders
+            </p>
+          )}
         </div>
       ) : (
         <Card className="p-12">

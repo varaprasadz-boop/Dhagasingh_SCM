@@ -32,7 +32,7 @@ import {
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Search, FileText, Calendar, DollarSign, Eye } from "lucide-react";
+import { Plus, Search, FileText, Calendar, DollarSign, Eye, ChevronDown } from "lucide-react";
 import { format } from "date-fns";
 import type { B2BInvoice, B2BOrderWithDetails, B2BClient } from "@shared/schema";
 
@@ -71,9 +71,12 @@ const statusColors: Record<string, string> = {
   cancelled: "bg-gray-100 text-gray-600",
 };
 
+const ITEMS_PER_PAGE = 10;
+
 export default function B2BInvoices() {
   const [search, setSearch] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
   const { toast } = useToast();
 
   const { data: invoices, isLoading } = useQuery<B2BInvoice[]>({
@@ -112,8 +115,19 @@ export default function B2BInvoices() {
       setIsDialogOpen(false);
       form.reset();
     },
-    onError: () => {
-      toast({ title: "Failed to create invoice", variant: "destructive" });
+    onError: (error: any) => {
+      const message = error?.message || "";
+      let description = "Please check the form and try again";
+      if (message.includes("403")) {
+        description = "You can only create invoices for your own orders";
+      } else if (message.includes("400")) {
+        description = "The selected client doesn't match the order";
+      }
+      toast({ 
+        title: "Could not create invoice", 
+        description,
+        variant: "destructive" 
+      });
     },
   });
 
@@ -325,7 +339,7 @@ export default function B2BInvoices() {
 
       {filteredInvoices && filteredInvoices.length > 0 ? (
         <div className="space-y-4">
-          {filteredInvoices.map((invoice) => {
+          {filteredInvoices.slice(0, displayCount).map((invoice) => {
             const order = orders?.find((o) => o.id === invoice.orderId);
             const client = clients?.find((c) => c.id === invoice.clientId);
             return (
@@ -372,6 +386,25 @@ export default function B2BInvoices() {
               </Card>
             );
           })}
+          
+          {filteredInvoices.length > displayCount && (
+            <div className="flex justify-center pt-4">
+              <Button 
+                variant="outline" 
+                onClick={() => setDisplayCount(prev => prev + ITEMS_PER_PAGE)}
+                data-testid="button-load-more"
+              >
+                <ChevronDown className="h-4 w-4 mr-2" />
+                Show More ({filteredInvoices.length - displayCount} remaining)
+              </Button>
+            </div>
+          )}
+          
+          {filteredInvoices.length > ITEMS_PER_PAGE && displayCount > ITEMS_PER_PAGE && (
+            <p className="text-center text-sm text-muted-foreground">
+              Showing {Math.min(displayCount, filteredInvoices.length)} of {filteredInvoices.length} invoices
+            </p>
+          )}
         </div>
       ) : (
         <Card className="p-12">

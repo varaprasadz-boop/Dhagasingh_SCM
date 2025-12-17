@@ -2065,15 +2065,31 @@ export async function registerRoutes(
 
   app.post("/api/b2b/invoices", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_INVOICES), async (req, res) => {
     try {
-      // Check ownership of the related order before creating invoice
+      const canViewAll = await canViewAllB2BData(req.user!);
+      
+      // Validate order ownership and client/order consistency
       if (req.body.orderId) {
         const order = await storage.getB2BOrderById(req.body.orderId);
         if (!order) {
           return res.status(404).json({ error: "Order not found" });
         }
-        const canViewAll = await canViewAllB2BData(req.user!);
         if (!canViewAll && order.createdBy !== req.user!.id) {
           return res.status(403).json({ error: "You can only create invoices for your own orders" });
+        }
+        // Ensure clientId matches the order's client if both are provided
+        if (req.body.clientId && req.body.clientId !== order.clientId) {
+          return res.status(400).json({ error: "Client ID does not match the order's client" });
+        }
+      }
+      
+      // Validate client ownership if only clientId is provided (no orderId)
+      if (req.body.clientId && !req.body.orderId) {
+        const client = await storage.getB2BClientById(req.body.clientId);
+        if (!client) {
+          return res.status(404).json({ error: "Client not found" });
+        }
+        if (!canViewAll && client.createdBy !== req.user!.id) {
+          return res.status(403).json({ error: "You can only create invoices for your own clients" });
         }
       }
       

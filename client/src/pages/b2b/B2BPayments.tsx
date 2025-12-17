@@ -32,7 +32,7 @@ import {
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Search, CreditCard, Calendar, DollarSign, TrendingUp, Clock } from "lucide-react";
+import { Plus, Search, CreditCard, Calendar, DollarSign, TrendingUp, Clock, ChevronDown } from "lucide-react";
 import { format } from "date-fns";
 import type { B2BPayment, B2BOrderWithDetails } from "@shared/schema";
 
@@ -55,9 +55,12 @@ const paymentMethodLabels: Record<string, string> = {
   card: "Card",
 };
 
+const ITEMS_PER_PAGE = 10;
+
 export default function B2BPayments() {
   const [search, setSearch] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
   const { toast } = useToast();
 
   const { data: payments, isLoading } = useQuery<B2BPayment[]>({
@@ -99,8 +102,13 @@ export default function B2BPayments() {
       setIsDialogOpen(false);
       form.reset();
     },
-    onError: () => {
-      toast({ title: "Failed to record payment", variant: "destructive" });
+    onError: (error: any) => {
+      const message = error?.message || "";
+      toast({ 
+        title: "Could not record payment", 
+        description: message.includes("403") ? "You can only record payments for your own orders" : "Please check the form and try again",
+        variant: "destructive" 
+      });
     },
   });
 
@@ -320,7 +328,7 @@ export default function B2BPayments() {
 
       {filteredPayments && filteredPayments.length > 0 ? (
         <div className="space-y-4">
-          {filteredPayments.map((payment) => {
+          {filteredPayments.slice(0, displayCount).map((payment) => {
             const order = orders?.find((o) => o.id === payment.orderId);
             return (
               <Card key={payment.id} className="hover-elevate" data-testid={`payment-card-${payment.id}`}>
@@ -354,6 +362,25 @@ export default function B2BPayments() {
               </Card>
             );
           })}
+          
+          {filteredPayments.length > displayCount && (
+            <div className="flex justify-center pt-4">
+              <Button 
+                variant="outline" 
+                onClick={() => setDisplayCount(prev => prev + ITEMS_PER_PAGE)}
+                data-testid="button-load-more"
+              >
+                <ChevronDown className="h-4 w-4 mr-2" />
+                Show More ({filteredPayments.length - displayCount} remaining)
+              </Button>
+            </div>
+          )}
+          
+          {filteredPayments.length > ITEMS_PER_PAGE && displayCount > ITEMS_PER_PAGE && (
+            <p className="text-center text-sm text-muted-foreground">
+              Showing {Math.min(displayCount, filteredPayments.length)} of {filteredPayments.length} payments
+            </p>
+          )}
         </div>
       ) : (
         <Card className="p-12">

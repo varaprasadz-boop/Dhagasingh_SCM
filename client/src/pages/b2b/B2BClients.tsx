@@ -85,8 +85,13 @@ export default function B2BClients() {
       setIsDialogOpen(false);
       form.reset();
     },
-    onError: () => {
-      toast({ title: "Failed to create client", variant: "destructive" });
+    onError: (error: any) => {
+      const message = error?.message || "Failed to create client";
+      toast({ 
+        title: "Could not create client", 
+        description: message.includes("403") ? "You don't have permission to create clients" : "Please check your connection and try again",
+        variant: "destructive" 
+      });
     },
   });
 
@@ -100,8 +105,13 @@ export default function B2BClients() {
       setEditingClient(null);
       form.reset();
     },
-    onError: () => {
-      toast({ title: "Failed to update client", variant: "destructive" });
+    onError: (error: any) => {
+      const message = error?.message || "";
+      toast({ 
+        title: "Could not update client", 
+        description: message.includes("403") ? "You can only update your own clients" : "Please check your connection and try again",
+        variant: "destructive" 
+      });
     },
   });
 
@@ -111,8 +121,13 @@ export default function B2BClients() {
       queryClient.invalidateQueries({ queryKey: ["/api/b2b/clients"] });
       toast({ title: "Client deleted successfully" });
     },
-    onError: () => {
-      toast({ title: "Failed to delete client", variant: "destructive" });
+    onError: (error: any) => {
+      const message = error?.message || "";
+      toast({ 
+        title: "Could not delete client", 
+        description: message.includes("403") ? "You can only delete your own clients" : "Please check your connection and try again",
+        variant: "destructive" 
+      });
     },
   });
 
