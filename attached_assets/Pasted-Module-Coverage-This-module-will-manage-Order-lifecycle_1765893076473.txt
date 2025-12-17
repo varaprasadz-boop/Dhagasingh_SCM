@@ -1,0 +1,139 @@
+Module Coverage
+This module will manage:
+•	Order lifecycle
+•	Product customization details
+•	Inventory availability (via integration)
+•	Invoicing
+•	Payment collection & proof
+•	Order & payment dashboards
+1. Order Management
+1.1 Order Creation
+•	Manual and system/API-based order creation
+•	Auto-generation of unique Order Number
+•	Capture:
+o	Client/company details
+o	Industry type
+o	Event type
+o	Delivery address
+o	Required delivery date
+o	Order priority (Normal/Urgent)
+1.2 Product & Customization Details
+•	Apparel type (T-shirt, hoodie, etc.)
+•	Size-wise quantity breakup
+•	Color and fabric selection
+•	Printing type (DTG, Screen, Sublimation, Embroidery)
+•	Print placement details
+•	Upload design/artwork files
+•	Special instructions
+2. Inventory Integration (Existing Module)
+•	Fetch live stock-in-hand by product, size, and color
+•	Stock availability validation at order confirmation
+•	Auto-reserve stock
+•	Auto-deduct stock at production or dispatch
+•	Revert stock on cancellation
+•	Display stock status indicators
+(Inventory logic remains in the existing module)
+3. Order Workflow & Tracking
+Configurable order stages:
+1.	Order Received
+2.	Design Review
+3.	Client Approval
+4.	Production Scheduled
+5.	Printing In Progress
+6.	Quality Check
+7.	Packed
+8.	Dispatched
+9.	Delivered
+10.	Closed / Cancelled
+•	Status change timestamps
+•	Delay & cancellation reason capture
+•	Order tracking via Order Number
+4. Pricing & Commercials
+•	Capture:
+o	Product cost
+o	Printing cost
+o	Design/setup charges
+o	Discounts
+o	Taxes (GST/VAT)
+•	Auto-calculation of:
+o	Subtotal
+o	Tax
+o	Grand total
+•	Role-based pricing edit permissions
+5. Invoice Management
+•	Generate Proforma Invoice and Tax Invoice
+•	Auto-generated Invoice Number
+•	Invoice creation triggers:
+o	On order confirmation or dispatch (configurable)
+•	Itemized invoice with tax breakup
+•	Invoice download & email
+•	Invoice version control and revisions
+ 
+6. Payment Tracking & Collection
+6.1 Payment Structure
+•	Support for:
+o	Advance payments
+o	Partial payments
+o	Full payments
+•	Configurable payment milestones
+6.2 Payment Capture
+For each payment:
+•	Payment date
+•	Amount received
+•	Mode of payment:
+o	Cash
+o	UPI
+o	Bank Transfer
+o	Card
+o	Cheque
+o	Online Gateway
+•	Transaction / reference number
+•	Upload proof of payment (image or PDF)
+•	Remarks
+•	User who recorded payment
+6.3 Payment Status
+•	Auto-calculated:
+o	Total invoiced amount
+o	Amount received
+o	Balance pending
+•	Payment status:
+o	Not Paid
+o	Advance Received
+o	Partially Paid
+o	Fully Paid
+o	Overdue
+•	Optional rule to block dispatch if payment pending
+ 
+7. Dashboards & Reporting
+7.1 Order Dashboard
+•	Orders by status
+•	Priority & delayed orders
+•	Orders by client, industry, date range
+7.2 Payment Dashboard
+•	Total invoiced vs collected
+•	Pending & overdue payments
+•	Advance vs balance payments
+•	Mode-wise collection summary
+7.3 Management Dashboard
+•	Order-to-cash pipeline
+•	Revenue trends
+•	Client-wise outstanding
+•	Aging analysis (0–15, 16–30, 31–60 days)
+8. Notifications & Alerts
+•	Order status changes
+•	Payment received confirmations
+•	Pending & overdue payment reminders
+•	Dispatch block alerts due to payment issues
+9. User Roles & Access Control
+•	Sales: Order creation & tracking
+•	Accounts: Invoices & payments
+•	Production: Order & inventory view
+•	Admin: Full access & configuration
+•	Management: Dashboard & reports (read-only)
+10. Audit & Security
+•	Audit trail for:
+o	Order updates
+o	Invoice changes
+o	Payment edits
+•	Secure file storage for designs & payment proofs
+•	Role-based access control
