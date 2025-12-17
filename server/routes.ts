@@ -1781,10 +1781,22 @@ export async function registerRoutes(
 
   // ==================== B2B Routes ====================
   
+  // Helper function to check if user can view all B2B data
+  async function canViewAllB2BData(user: UserWithRole): Promise<boolean> {
+    if (user.isSuperAdmin) return true;
+    const userPermissions = await storage.getUserPermissions(user.id);
+    return userPermissions.includes(PERMISSION_CODES.VIEW_ALL_B2B_DATA);
+  }
+  
   // B2B Clients
   app.get("/api/b2b/clients", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_CLIENTS), async (req, res) => {
     try {
-      const clients = await storage.getB2BClients();
+      const canViewAll = await canViewAllB2BData(req.user!);
+      const filters: { createdBy?: string } = {};
+      if (!canViewAll) {
+        filters.createdBy = req.user!.id;
+      }
+      const clients = await storage.getB2BClients(filters);
       res.json(clients);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch clients" });
@@ -1797,6 +1809,11 @@ export async function registerRoutes(
       if (!client) {
         return res.status(404).json({ error: "Client not found" });
       }
+      // Check ownership if user cannot view all data
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && client.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only view your own clients" });
+      }
       res.json(client);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch client" });
@@ -1805,7 +1822,11 @@ export async function registerRoutes(
 
   app.post("/api/b2b/clients", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_CLIENTS), async (req, res) => {
     try {
-      const client = await storage.createB2BClient(req.body);
+      // Set createdBy to current user
+      const client = await storage.createB2BClient({
+        ...req.body,
+        createdBy: req.user!.id,
+      });
       res.status(201).json(client);
     } catch (error) {
       console.error("Error creating client:", error);
@@ -1815,10 +1836,16 @@ export async function registerRoutes(
 
   app.patch("/api/b2b/clients/:id", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_CLIENTS), async (req, res) => {
     try {
-      const client = await storage.updateB2BClient(req.params.id, req.body);
-      if (!client) {
+      // Check ownership before update
+      const existingClient = await storage.getB2BClientById(req.params.id);
+      if (!existingClient) {
         return res.status(404).json({ error: "Client not found" });
       }
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && existingClient.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only update your own clients" });
+      }
+      const client = await storage.updateB2BClient(req.params.id, req.body);
       res.json(client);
     } catch (error) {
       res.status(500).json({ error: "Failed to update client" });
@@ -1827,6 +1854,15 @@ export async function registerRoutes(
 
   app.delete("/api/b2b/clients/:id", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_CLIENTS), async (req, res) => {
     try {
+      // Check ownership before delete
+      const existingClient = await storage.getB2BClientById(req.params.id);
+      if (!existingClient) {
+        return res.status(404).json({ error: "Client not found" });
+      }
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && existingClient.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only delete your own clients" });
+      }
       await storage.deleteB2BClient(req.params.id);
       res.json({ success: true });
     } catch (error) {
@@ -1837,12 +1873,18 @@ export async function registerRoutes(
   // B2B Orders
   app.get("/api/b2b/orders", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_ORDERS), async (req, res) => {
     try {
+      const canViewAll = await canViewAllB2BData(req.user!);
       const filters: any = {};
       if (req.query.status) filters.status = req.query.status as string;
       if (req.query.paymentStatus) filters.paymentStatus = req.query.paymentStatus as string;
       if (req.query.clientId) filters.clientId = req.query.clientId as string;
       if (req.query.priority) filters.priority = req.query.priority as string;
       if (req.query.search) filters.search = req.query.search as string;
+      
+      // Apply ownership filter if user cannot view all data
+      if (!canViewAll) {
+        filters.createdBy = req.user!.id;
+      }
       
       const orders = await storage.getB2BOrders(filters);
       res.json(orders);
@@ -1856,6 +1898,11 @@ export async function registerRoutes(
       const order = await storage.getB2BOrderById(req.params.id);
       if (!order) {
         return res.status(404).json({ error: "Order not found" });
+      }
+      // Check ownership if user cannot view all data
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && order.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only view your own orders" });
       }
       res.json(order);
     } catch (error) {
@@ -1879,10 +1926,16 @@ export async function registerRoutes(
 
   app.patch("/api/b2b/orders/:id", authMiddleware, requirePermission(PERMISSION_CODES.EDIT_B2B_ORDERS), async (req, res) => {
     try {
-      const order = await storage.updateB2BOrder(req.params.id, req.body);
-      if (!order) {
+      // Check ownership before update
+      const existingOrder = await storage.getB2BOrderById(req.params.id);
+      if (!existingOrder) {
         return res.status(404).json({ error: "Order not found" });
       }
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && existingOrder.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only update your own orders" });
+      }
+      const order = await storage.updateB2BOrder(req.params.id, req.body);
       res.json(order);
     } catch (error) {
       res.status(500).json({ error: "Failed to update order" });
@@ -1891,11 +1944,17 @@ export async function registerRoutes(
 
   app.post("/api/b2b/orders/:id/status", authMiddleware, requirePermission(PERMISSION_CODES.UPDATE_B2B_ORDER_STATUS), async (req, res) => {
     try {
-      const { status, comment } = req.body;
-      const order = await storage.updateB2BOrderStatus(req.params.id, status, comment, req.user!.id);
-      if (!order) {
+      // Check ownership before status update
+      const existingOrder = await storage.getB2BOrderById(req.params.id);
+      if (!existingOrder) {
         return res.status(404).json({ error: "Order not found" });
       }
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && existingOrder.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only update status of your own orders" });
+      }
+      const { status, comment } = req.body;
+      const order = await storage.updateB2BOrderStatus(req.params.id, status, comment, req.user!.id);
       res.json(order);
     } catch (error) {
       res.status(500).json({ error: "Failed to update order status" });
@@ -1904,6 +1963,15 @@ export async function registerRoutes(
 
   app.delete("/api/b2b/orders/:id", authMiddleware, requirePermission(PERMISSION_CODES.DELETE_B2B_ORDERS), async (req, res) => {
     try {
+      // Check ownership before delete
+      const existingOrder = await storage.getB2BOrderById(req.params.id);
+      if (!existingOrder) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && existingOrder.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only delete your own orders" });
+      }
       await storage.deleteB2BOrder(req.params.id);
       res.json({ success: true });
     } catch (error) {
@@ -1914,6 +1982,15 @@ export async function registerRoutes(
   // B2B Order Artwork
   app.post("/api/b2b/orders/:id/artwork", authMiddleware, requirePermission(PERMISSION_CODES.EDIT_B2B_ORDERS), async (req, res) => {
     try {
+      // Check ownership before adding artwork
+      const existingOrder = await storage.getB2BOrderById(req.params.id);
+      if (!existingOrder) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && existingOrder.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only add artwork to your own orders" });
+      }
       const artwork = await storage.addB2BOrderArtwork({
         ...req.body,
         orderId: req.params.id,
@@ -1927,6 +2004,19 @@ export async function registerRoutes(
 
   app.delete("/api/b2b/artwork/:id", authMiddleware, requirePermission(PERMISSION_CODES.EDIT_B2B_ORDERS), async (req, res) => {
     try {
+      // Look up the artwork to get its order, then verify ownership
+      const artwork = await storage.getB2BOrderArtworkById(req.params.id);
+      if (!artwork) {
+        return res.status(404).json({ error: "Artwork not found" });
+      }
+      const order = await storage.getB2BOrderById(artwork.orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Related order not found" });
+      }
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && order.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only delete artwork from your own orders" });
+      }
       await storage.deleteB2BOrderArtwork(req.params.id);
       res.json({ success: true });
     } catch (error) {
@@ -1937,11 +2027,17 @@ export async function registerRoutes(
   // B2B Invoices
   app.get("/api/b2b/invoices", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_INVOICES), async (req, res) => {
     try {
+      const canViewAll = await canViewAllB2BData(req.user!);
       const filters: any = {};
       if (req.query.status) filters.status = req.query.status as string;
       if (req.query.invoiceType) filters.invoiceType = req.query.invoiceType as string;
       if (req.query.clientId) filters.clientId = req.query.clientId as string;
       if (req.query.orderId) filters.orderId = req.query.orderId as string;
+      
+      // Apply ownership filter if user cannot view all data
+      if (!canViewAll) {
+        filters.createdBy = req.user!.id;
+      }
       
       const invoices = await storage.getB2BInvoices(filters);
       res.json(invoices);
@@ -1956,6 +2052,11 @@ export async function registerRoutes(
       if (!invoice) {
         return res.status(404).json({ error: "Invoice not found" });
       }
+      // Check ownership if user cannot view all data
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && invoice.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only view your own invoices" });
+      }
       res.json(invoice);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch invoice" });
@@ -1964,6 +2065,18 @@ export async function registerRoutes(
 
   app.post("/api/b2b/invoices", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_INVOICES), async (req, res) => {
     try {
+      // Check ownership of the related order before creating invoice
+      if (req.body.orderId) {
+        const order = await storage.getB2BOrderById(req.body.orderId);
+        if (!order) {
+          return res.status(404).json({ error: "Order not found" });
+        }
+        const canViewAll = await canViewAllB2BData(req.user!);
+        if (!canViewAll && order.createdBy !== req.user!.id) {
+          return res.status(403).json({ error: "You can only create invoices for your own orders" });
+        }
+      }
+      
       const invoice = await storage.createB2BInvoice({
         ...req.body,
         createdBy: req.user!.id,
@@ -1977,10 +2090,16 @@ export async function registerRoutes(
 
   app.patch("/api/b2b/invoices/:id", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_INVOICES), async (req, res) => {
     try {
-      const invoice = await storage.updateB2BInvoice(req.params.id, req.body);
-      if (!invoice) {
+      // Check ownership before update
+      const existingInvoice = await storage.getB2BInvoiceById(req.params.id);
+      if (!existingInvoice) {
         return res.status(404).json({ error: "Invoice not found" });
       }
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && existingInvoice.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only update your own invoices" });
+      }
+      const invoice = await storage.updateB2BInvoice(req.params.id, req.body);
       res.json(invoice);
     } catch (error) {
       res.status(500).json({ error: "Failed to update invoice" });
@@ -1991,7 +2110,22 @@ export async function registerRoutes(
   app.get("/api/b2b/payments", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_PAYMENTS), async (req, res) => {
     try {
       const orderId = req.query.orderId as string | undefined;
-      const payments = await storage.getB2BPayments(orderId);
+      const canViewAll = await canViewAllB2BData(req.user!);
+      
+      // If orderId specified, verify ownership of that order
+      if (orderId) {
+        const order = await storage.getB2BOrderById(orderId);
+        if (!order) {
+          return res.status(404).json({ error: "Order not found" });
+        }
+        if (!canViewAll && order.createdBy !== req.user!.id) {
+          return res.status(403).json({ error: "You can only view payments for your own orders" });
+        }
+      }
+      
+      // Get payments with ownership filtering
+      const createdBy = canViewAll ? undefined : req.user!.id;
+      const payments = await storage.getB2BPayments(orderId, createdBy);
       res.json(payments);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch payments" });
@@ -2000,6 +2134,16 @@ export async function registerRoutes(
 
   app.post("/api/b2b/payments", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_PAYMENTS), async (req, res) => {
     try {
+      // Check ownership of the related order before creating payment
+      const order = await storage.getB2BOrderById(req.body.orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && order.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only create payments for your own orders" });
+      }
+      
       const payment = await storage.createB2BPayment({
         ...req.body,
         recordedBy: req.user!.id,
@@ -2014,6 +2158,15 @@ export async function registerRoutes(
   // B2B Payment Milestones
   app.get("/api/b2b/orders/:id/milestones", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_PAYMENTS), async (req, res) => {
     try {
+      // Check ownership of the related order
+      const order = await storage.getB2BOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && order.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only view milestones for your own orders" });
+      }
       const milestones = await storage.getB2BPaymentMilestones(req.params.id);
       res.json(milestones);
     } catch (error) {
@@ -2023,6 +2176,15 @@ export async function registerRoutes(
 
   app.post("/api/b2b/orders/:id/milestones", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_PAYMENTS), async (req, res) => {
     try {
+      // Check ownership of the related order
+      const order = await storage.getB2BOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && order.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only create milestones for your own orders" });
+      }
       const milestone = await storage.createB2BPaymentMilestone({
         ...req.body,
         orderId: req.params.id,
@@ -2035,11 +2197,21 @@ export async function registerRoutes(
 
   app.patch("/api/b2b/milestones/:id", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_B2B_PAYMENTS), async (req, res) => {
     try {
-      const milestone = await storage.updateB2BPaymentMilestone(req.params.id, req.body);
+      // Get milestone to check order ownership
+      const milestone = await storage.getB2BPaymentMilestoneById(req.params.id);
       if (!milestone) {
         return res.status(404).json({ error: "Milestone not found" });
       }
-      res.json(milestone);
+      const order = await storage.getB2BOrderById(milestone.orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Related order not found" });
+      }
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && order.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only update milestones for your own orders" });
+      }
+      const updatedMilestone = await storage.updateB2BPaymentMilestone(req.params.id, req.body);
+      res.json(updatedMilestone);
     } catch (error) {
       res.status(500).json({ error: "Failed to update milestone" });
     }
@@ -2048,7 +2220,9 @@ export async function registerRoutes(
   // B2B Dashboard
   app.get("/api/b2b/dashboard", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_DASHBOARD), async (req, res) => {
     try {
-      const stats = await storage.getB2BDashboardStats();
+      const canViewAll = await canViewAllB2BData(req.user!);
+      const createdBy = canViewAll ? undefined : req.user!.id;
+      const stats = await storage.getB2BDashboardStats(createdBy);
       res.json(stats);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch dashboard stats" });

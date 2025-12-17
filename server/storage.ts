@@ -147,7 +147,7 @@ export interface IStorage {
   seedDefaultData(): Promise<void>;
   
   // B2B Clients
-  getB2BClients(): Promise<B2BClient[]>;
+  getB2BClients(filters?: B2BClientFilters): Promise<B2BClient[]>;
   getB2BClientById(id: string): Promise<B2BClient | undefined>;
   createB2BClient(client: InsertB2BClient): Promise<B2BClient>;
   updateB2BClient(id: string, client: Partial<InsertB2BClient>): Promise<B2BClient | undefined>;
@@ -164,6 +164,7 @@ export interface IStorage {
   
   // B2B Order Artwork
   addB2BOrderArtwork(artwork: InsertB2BOrderArtwork): Promise<B2BOrderArtwork>;
+  getB2BOrderArtworkById(id: string): Promise<B2BOrderArtwork | undefined>;
   deleteB2BOrderArtwork(id: string): Promise<boolean>;
   
   // B2B Invoices
@@ -173,16 +174,17 @@ export interface IStorage {
   updateB2BInvoice(id: string, invoice: Partial<InsertB2BInvoice>): Promise<B2BInvoice | undefined>;
   
   // B2B Payments
-  getB2BPayments(orderId?: string): Promise<B2BPayment[]>;
+  getB2BPayments(orderId?: string, createdBy?: string): Promise<B2BPayment[]>;
   createB2BPayment(payment: InsertB2BPayment): Promise<B2BPayment>;
   
   // B2B Payment Milestones
   getB2BPaymentMilestones(orderId: string): Promise<B2BPaymentMilestone[]>;
+  getB2BPaymentMilestoneById(id: string): Promise<B2BPaymentMilestone | undefined>;
   createB2BPaymentMilestone(milestone: InsertB2BPaymentMilestone): Promise<B2BPaymentMilestone>;
   updateB2BPaymentMilestone(id: string, milestone: Partial<InsertB2BPaymentMilestone>): Promise<B2BPaymentMilestone | undefined>;
   
   // B2B Dashboard Stats
-  getB2BDashboardStats(): Promise<B2BDashboardStats>;
+  getB2BDashboardStats(createdBy?: string): Promise<B2BDashboardStats>;
 }
 
 interface OrderFilters {
@@ -247,6 +249,7 @@ interface B2BOrderFilters {
   fromDate?: Date;
   toDate?: Date;
   search?: string;
+  createdBy?: string;
 }
 
 interface B2BInvoiceFilters {
@@ -256,6 +259,16 @@ interface B2BInvoiceFilters {
   orderId?: string;
   fromDate?: Date;
   toDate?: Date;
+  createdBy?: string;
+}
+
+interface B2BClientFilters {
+  createdBy?: string;
+}
+
+interface B2BPaymentFilters {
+  orderId?: string;
+  createdBy?: string;
 }
 
 export interface B2BDashboardStats {
@@ -1396,9 +1409,15 @@ class DatabaseStorage implements IStorage {
   }
 
   // B2B Clients
-  async getB2BClients(): Promise<B2BClient[]> {
+  async getB2BClients(filters?: B2BClientFilters): Promise<B2BClient[]> {
     try {
-      const result = await db.select().from(b2bClients).orderBy(desc(b2bClients.createdAt));
+      const conditions: any[] = [];
+      
+      if (filters?.createdBy) conditions.push(eq(b2bClients.createdBy, filters.createdBy));
+      
+      const result = await db.select().from(b2bClients)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(b2bClients.createdAt));
       return result || [];
     } catch (error) {
       console.error("Error fetching B2B clients:", error);
@@ -1445,6 +1464,7 @@ class DatabaseStorage implements IStorage {
       if (filters?.priority) conditions.push(eq(b2bOrders.priority, filters.priority));
       if (filters?.fromDate) conditions.push(gte(b2bOrders.createdAt, filters.fromDate));
       if (filters?.toDate) conditions.push(lte(b2bOrders.createdAt, filters.toDate));
+      if (filters?.createdBy) conditions.push(eq(b2bOrders.createdBy, filters.createdBy));
       if (filters?.search) {
         conditions.push(or(
           like(b2bOrders.orderNumber, `%${filters.search}%`)
@@ -1580,6 +1600,16 @@ class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  async getB2BOrderArtworkById(id: string): Promise<B2BOrderArtwork | undefined> {
+    try {
+      const result = await db.select().from(b2bOrderArtwork).where(eq(b2bOrderArtwork.id, id));
+      return result?.[0];
+    } catch (error) {
+      console.error("Error fetching B2B order artwork:", error);
+      return undefined;
+    }
+  }
+
   async deleteB2BOrderArtwork(id: string): Promise<boolean> {
     await db.delete(b2bOrderArtwork).where(eq(b2bOrderArtwork.id, id));
     return true;
@@ -1596,6 +1626,7 @@ class DatabaseStorage implements IStorage {
       if (filters?.orderId) conditions.push(eq(b2bInvoices.orderId, filters.orderId));
       if (filters?.fromDate) conditions.push(gte(b2bInvoices.invoiceDate, filters.fromDate));
       if (filters?.toDate) conditions.push(lte(b2bInvoices.invoiceDate, filters.toDate));
+      if (filters?.createdBy) conditions.push(eq(b2bInvoices.createdBy, filters.createdBy));
 
       const result = await db.select().from(b2bInvoices)
         .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -1632,8 +1663,24 @@ class DatabaseStorage implements IStorage {
   }
 
   // B2B Payments
-  async getB2BPayments(orderId?: string): Promise<B2BPayment[]> {
+  async getB2BPayments(orderId?: string, createdBy?: string): Promise<B2BPayment[]> {
     try {
+      // If createdBy is specified, we need to filter payments by order ownership
+      if (createdBy) {
+        // Join with orders to filter by creator
+        const result = await db
+          .select({ payment: b2bPayments })
+          .from(b2bPayments)
+          .innerJoin(b2bOrders, eq(b2bPayments.orderId, b2bOrders.id))
+          .where(
+            orderId 
+              ? and(eq(b2bPayments.orderId, orderId), eq(b2bOrders.createdBy, createdBy))
+              : eq(b2bOrders.createdBy, createdBy)
+          )
+          .orderBy(desc(b2bPayments.paymentDate));
+        return (result || []).map(r => r.payment);
+      }
+      
       if (orderId) {
         const result = await db.select().from(b2bPayments).where(eq(b2bPayments.orderId, orderId)).orderBy(desc(b2bPayments.paymentDate));
         return result || [];
@@ -1691,6 +1738,16 @@ class DatabaseStorage implements IStorage {
     }
   }
 
+  async getB2BPaymentMilestoneById(id: string): Promise<B2BPaymentMilestone | undefined> {
+    try {
+      const result = await db.select().from(b2bPaymentMilestones).where(eq(b2bPaymentMilestones.id, id));
+      return result?.[0];
+    } catch (error) {
+      console.error("Error fetching B2B payment milestone:", error);
+      return undefined;
+    }
+  }
+
   async createB2BPaymentMilestone(milestone: InsertB2BPaymentMilestone): Promise<B2BPaymentMilestone> {
     const id = randomUUID();
     await db.insert(b2bPaymentMilestones).values({ ...milestone, id });
@@ -1706,10 +1763,16 @@ class DatabaseStorage implements IStorage {
   }
 
   // B2B Dashboard Stats
-  async getB2BDashboardStats(): Promise<B2BDashboardStats> {
+  async getB2BDashboardStats(createdBy?: string): Promise<B2BDashboardStats> {
     try {
-      const [clientCount] = await db.select({ count: count() }).from(b2bClients).where(eq(b2bClients.status, "active"));
-      const allOrders = await db.select().from(b2bOrders);
+      // Apply ownership filter if createdBy is specified
+      const clientConditions = createdBy 
+        ? and(eq(b2bClients.status, "active"), eq(b2bClients.createdBy, createdBy))
+        : eq(b2bClients.status, "active");
+      const [clientCount] = await db.select({ count: count() }).from(b2bClients).where(clientConditions);
+      
+      const orderConditions = createdBy ? eq(b2bOrders.createdBy, createdBy) : undefined;
+      const allOrders = await db.select().from(b2bOrders).where(orderConditions);
       
       const activeStatuses = ["order_received", "design_review", "client_approval", "production_scheduled", "printing_in_progress", "quality_check", "packed"];
       const activeOrders = allOrders.filter(o => activeStatuses.includes(o.status));
@@ -1819,6 +1882,7 @@ class DatabaseStorage implements IStorage {
       { code: "view_b2b_payments", name: "View B2B Payments", description: "View B2B payments", module: "b2b" },
       { code: "manage_b2b_payments", name: "Manage B2B Payments", description: "Record B2B payments", module: "b2b" },
       { code: "view_b2b_dashboard", name: "View B2B Dashboard", description: "View B2B dashboard", module: "b2b" },
+      { code: "view_all_b2b_data", name: "View All B2B Data", description: "View all B2B clients, orders, invoices regardless of who created them (for managers)", module: "b2b" },
     ];
 
     let existingPerms: Permission[] = [];

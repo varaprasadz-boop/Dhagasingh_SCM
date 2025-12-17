@@ -925,6 +925,7 @@ export const PERMISSION_CODES = {
   VIEW_B2B_PAYMENTS: "view_b2b_payments",
   MANAGE_B2B_PAYMENTS: "manage_b2b_payments",
   VIEW_B2B_DASHBOARD: "view_b2b_dashboard",
+  VIEW_ALL_B2B_DATA: "view_all_b2b_data",
 } as const;
 
 export type PermissionCode = typeof PERMISSION_CODES[keyof typeof PERMISSION_CODES];
