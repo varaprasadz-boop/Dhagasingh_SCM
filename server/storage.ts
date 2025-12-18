@@ -1651,14 +1651,32 @@ class DatabaseStorage implements IStorage {
   async createB2BInvoice(invoice: InsertB2BInvoice): Promise<B2BInvoice> {
     const id = randomUUID();
     const invoiceNumber = `INV-${Date.now().toString(36).toUpperCase()}`;
-    await db.insert(b2bInvoices).values({ ...invoice, id, invoiceNumber });
+    
+    // Convert date strings to Date objects for database
+    const invoiceData = {
+      ...invoice,
+      id,
+      invoiceNumber,
+      dueDate: invoice.dueDate ? (typeof invoice.dueDate === 'string' ? new Date(invoice.dueDate) : invoice.dueDate) : null,
+      invoiceDate: invoice.invoiceDate ? (typeof invoice.invoiceDate === 'string' ? new Date(invoice.invoiceDate) : invoice.invoiceDate) : new Date(),
+    };
+    
+    await db.insert(b2bInvoices).values(invoiceData);
     const created = await this.getB2BInvoiceById(id);
     if (!created) throw new Error("Failed to create B2B invoice");
     return created;
   }
 
   async updateB2BInvoice(id: string, invoice: Partial<InsertB2BInvoice>): Promise<B2BInvoice | undefined> {
-    await db.update(b2bInvoices).set({ ...invoice, updatedAt: new Date() }).where(eq(b2bInvoices.id, id));
+    // Convert date strings to Date objects for database
+    const updateData: any = { ...invoice, updatedAt: new Date() };
+    if (invoice.dueDate && typeof invoice.dueDate === 'string') {
+      updateData.dueDate = new Date(invoice.dueDate);
+    }
+    if (invoice.invoiceDate && typeof invoice.invoiceDate === 'string') {
+      updateData.invoiceDate = new Date(invoice.invoiceDate);
+    }
+    await db.update(b2bInvoices).set(updateData).where(eq(b2bInvoices.id, id));
     return this.getB2BInvoiceById(id);
   }
 
@@ -1695,7 +1713,15 @@ class DatabaseStorage implements IStorage {
 
   async createB2BPayment(payment: InsertB2BPayment): Promise<B2BPayment> {
     const id = randomUUID();
-    await db.insert(b2bPayments).values({ ...payment, id });
+    
+    // Convert date strings to Date objects for database
+    const paymentData = {
+      ...payment,
+      id,
+      paymentDate: payment.paymentDate ? (typeof payment.paymentDate === 'string' ? new Date(payment.paymentDate) : payment.paymentDate) : new Date(),
+    };
+    
+    await db.insert(b2bPayments).values(paymentData);
     
     const order = await this.getB2BOrderById(payment.orderId);
     if (order) {
@@ -1750,14 +1776,31 @@ class DatabaseStorage implements IStorage {
 
   async createB2BPaymentMilestone(milestone: InsertB2BPaymentMilestone): Promise<B2BPaymentMilestone> {
     const id = randomUUID();
-    await db.insert(b2bPaymentMilestones).values({ ...milestone, id });
+    
+    // Convert date strings to Date objects for database
+    const milestoneData = {
+      ...milestone,
+      id,
+      dueDate: milestone.dueDate ? (typeof milestone.dueDate === 'string' ? new Date(milestone.dueDate) : milestone.dueDate) : null,
+      paidAt: milestone.paidAt ? (typeof milestone.paidAt === 'string' ? new Date(milestone.paidAt) : milestone.paidAt) : null,
+    };
+    
+    await db.insert(b2bPaymentMilestones).values(milestoneData);
     const result = await db.select().from(b2bPaymentMilestones).where(eq(b2bPaymentMilestones.id, id));
     if (!result?.[0]) throw new Error("Failed to create milestone");
     return result[0];
   }
 
   async updateB2BPaymentMilestone(id: string, milestone: Partial<InsertB2BPaymentMilestone>): Promise<B2BPaymentMilestone | undefined> {
-    await db.update(b2bPaymentMilestones).set(milestone).where(eq(b2bPaymentMilestones.id, id));
+    // Convert date strings to Date objects for database
+    const updateData: any = { ...milestone };
+    if (milestone.dueDate && typeof milestone.dueDate === 'string') {
+      updateData.dueDate = new Date(milestone.dueDate);
+    }
+    if (milestone.paidAt && typeof milestone.paidAt === 'string') {
+      updateData.paidAt = new Date(milestone.paidAt);
+    }
+    await db.update(b2bPaymentMilestones).set(updateData).where(eq(b2bPaymentMilestones.id, id));
     const result = await db.select().from(b2bPaymentMilestones).where(eq(b2bPaymentMilestones.id, id));
     return result?.[0];
   }
