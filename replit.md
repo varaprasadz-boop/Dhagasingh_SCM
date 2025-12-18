@@ -8,6 +8,29 @@ DS_SCM is a comprehensive supply chain management system for eCommerce, managing
 
 Preferred communication style: Simple, everyday language.
 
+## Test Credentials
+
+### B2B Sales Employee
+- **Email**: b2bsales@dsscm.com
+- **Password**: b2btest123
+- **Role**: B2B Sales (full B2B permissions - clients, orders, invoices, payments)
+
+### Admin User
+- **Email**: admin@dsscm.com
+- **Password**: admin123
+- **Role**: Admin (full system access)
+
+## Development Notes
+
+### B2B Module API Notes
+- **Date fields**: All date fields (dueDate, invoiceDate, paymentDate, paidAt) accept ISO date strings and are converted to Date objects in storage layer
+- **Payment field naming**: Use `paymentMode` not `paymentMethod` in API requests
+- **Required fields**: 
+  - B2B orders require `deliveryAddress` (NOT NULL constraint)
+  - B2B invoices require `orderId`, `clientId`, `invoiceType`
+  - B2B payments require `orderId`, `amount`, `paymentMode`
+- **Permission structure**: B2B uses VIEW_ALL_B2B_DATA permission to allow managers to see all data; regular B2B employees only see their own clients/orders
+
 ## System Architecture
 
 ### Frontend Architecture
