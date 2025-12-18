@@ -20,6 +20,24 @@ Preferred communication style: Simple, everyday language.
 - **Password**: admin123
 - **Role**: Admin (full system access)
 
+## Testing Documentation
+
+### Testing Checklist Files
+- **TESTING_CHECKLIST.md** - Complete testing checklist in Markdown format (171 test cases)
+- **DS_SCM_Testing_Checklist.xlsx** - Excel version with separate sheets per module, Pass/Fail columns, and summary
+
+### Checklist Coverage
+- Authentication (7 tests)
+- Main Navigation: Dashboard, Products, Orders, Inventory, Internal Delivery, Suppliers, Couriers, Courier Status, Complaints, Reports, Users, Roles, Settings
+- B2B Module: Dashboard, Clients, Orders (with 10-stage workflow), Invoices, Payments
+- Mobile PWA: Dashboard, Scan, Orders, Stock, Profile, Navigation
+- Cross-cutting: Role-Based Access, Data Validation, Error Handling, UI/UX
+- Bulk Operations: Order Import, Courier Status Update
+- Database Integrity & Performance
+
+### Regenerating Excel Checklist
+Run: `npx tsx scripts/generate-testing-excel.ts`
+
 ## Development Notes
 
 ### B2B Module API Notes
