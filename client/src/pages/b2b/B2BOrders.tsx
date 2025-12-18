@@ -47,6 +47,7 @@ const orderFormSchema = z.object({
   priority: z.enum(["normal", "urgent", "express"]),
   totalAmount: z.coerce.number().positive("Total amount must be greater than 0"),
   expectedDeliveryDate: z.string().optional(),
+  deliveryAddress: z.string().min(1, "Delivery address is required"),
   specialInstructions: z.string().optional().or(z.literal("")),
 });
 
@@ -122,6 +123,7 @@ export default function B2BOrders() {
       priority: "normal",
       totalAmount: 0,
       expectedDeliveryDate: "",
+      deliveryAddress: "",
       specialInstructions: "",
     },
   });
@@ -349,6 +351,20 @@ export default function B2BOrders() {
                     )}
                   />
                 </div>
+
+                <FormField
+                  control={form.control}
+                  name="deliveryAddress"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Delivery Address *</FormLabel>
+                      <FormControl>
+                        <Textarea {...field} placeholder="Full delivery address" data-testid="input-delivery-address" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
                 <FormField
                   control={form.control}
