@@ -36,18 +36,14 @@ import { Plus, Search, FileText, Calendar, DollarSign, Eye, ChevronDown } from "
 import { format } from "date-fns";
 import type { B2BInvoice, B2BOrderWithDetails, B2BClient } from "@shared/schema";
 
-const optionalNumber = z.preprocess(
-  (val) => (val === "" || val === undefined ? undefined : val),
-  z.coerce.number().nonnegative().optional()
-);
-
 const invoiceFormSchema = z.object({
   orderId: z.string().min(1, "Order is required"),
   clientId: z.string().min(1, "Client is required"),
   invoiceType: z.enum(["proforma", "tax"]),
   subtotal: z.coerce.number().positive("Subtotal must be greater than 0"),
-  taxAmount: optionalNumber,
-  discountAmount: optionalNumber,
+  taxRate: z.coerce.number().nonnegative().default(18),
+  taxAmount: z.coerce.number().nonnegative().default(0),
+  discount: z.coerce.number().nonnegative().default(0),
   totalAmount: z.coerce.number().positive("Total must be greater than 0"),
   dueDate: z.string().optional(),
   notes: z.string().optional().or(z.literal("")),
@@ -98,8 +94,9 @@ export default function B2BInvoices() {
       clientId: "",
       invoiceType: "proforma",
       subtotal: 0,
-      taxAmount: undefined,
-      discountAmount: undefined,
+      taxRate: 18,
+      taxAmount: 0,
+      discount: 0,
       totalAmount: 0,
       dueDate: "",
       notes: "",
@@ -138,10 +135,18 @@ export default function B2BInvoices() {
   const handleOrderSelect = (orderId: string) => {
     const order = orders?.find((o) => o.id === orderId);
     if (order) {
+      const subtotal = parseFloat(order.totalAmount as string) || 0;
+      const taxRate = 18;
+      const taxAmount = Math.round(subtotal * taxRate / 100);
+      const totalAmount = subtotal + taxAmount;
+      
       form.setValue("orderId", orderId);
       form.setValue("clientId", order.clientId);
-      form.setValue("subtotal", order.totalAmount);
-      form.setValue("totalAmount", order.totalAmount);
+      form.setValue("subtotal", subtotal);
+      form.setValue("taxRate", taxRate);
+      form.setValue("taxAmount", taxAmount);
+      form.setValue("discount", 0);
+      form.setValue("totalAmount", totalAmount);
     }
   };
 
@@ -260,6 +265,22 @@ export default function B2BInvoices() {
                   />
                   <FormField
                     control={form.control}
+                    name="taxRate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Tax Rate (%)</FormLabel>
+                        <FormControl>
+                          <Input {...field} type="number" placeholder="18" data-testid="input-tax-rate" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
                     name="taxAmount"
                     render={({ field }) => (
                       <FormItem>
@@ -271,12 +292,9 @@ export default function B2BInvoices() {
                       </FormItem>
                     )}
                   />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
-                    name="discountAmount"
+                    name="discount"
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Discount</FormLabel>
@@ -287,20 +305,21 @@ export default function B2BInvoices() {
                       </FormItem>
                     )}
                   />
-                  <FormField
-                    control={form.control}
-                    name="totalAmount"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Total Amount *</FormLabel>
-                        <FormControl>
-                          <Input {...field} type="number" placeholder="0" data-testid="input-total" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
                 </div>
+
+                <FormField
+                  control={form.control}
+                  name="totalAmount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Total Amount *</FormLabel>
+                      <FormControl>
+                        <Input {...field} type="number" placeholder="0" data-testid="input-total" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
                 <FormField
                   control={form.control}

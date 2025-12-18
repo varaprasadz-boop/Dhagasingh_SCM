@@ -39,15 +39,15 @@ import type { B2BPayment, B2BOrderWithDetails } from "@shared/schema";
 const paymentFormSchema = z.object({
   orderId: z.string().min(1, "Order is required"),
   amount: z.coerce.number().positive("Amount must be greater than 0"),
-  paymentMethod: z.enum(["cash", "bank_transfer", "upi", "cheque", "card"]),
-  referenceNumber: z.string().optional().or(z.literal("")),
+  paymentMode: z.enum(["cash", "bank_transfer", "upi", "cheque", "card"]),
+  transactionRef: z.string().optional().or(z.literal("")),
   paymentDate: z.string().min(1, "Payment date is required"),
-  notes: z.string().optional().or(z.literal("")),
+  remarks: z.string().optional().or(z.literal("")),
 });
 
 type PaymentFormData = z.infer<typeof paymentFormSchema>;
 
-const paymentMethodLabels: Record<string, string> = {
+const paymentModeLabels: Record<string, string> = {
   cash: "Cash",
   bank_transfer: "Bank Transfer",
   upi: "UPI",
@@ -84,10 +84,10 @@ export default function B2BPayments() {
     defaultValues: {
       orderId: "",
       amount: 0,
-      paymentMethod: "bank_transfer",
-      referenceNumber: "",
+      paymentMode: "bank_transfer",
+      transactionRef: "",
       paymentDate: new Date().toISOString().split("T")[0],
-      notes: "",
+      remarks: "",
     },
   });
 
@@ -120,7 +120,7 @@ export default function B2BPayments() {
     const order = orders?.find((o) => o.id === payment.orderId);
     return (
       order?.orderNumber?.toLowerCase().includes(search.toLowerCase()) ||
-      payment.referenceNumber?.toLowerCase().includes(search.toLowerCase()) ||
+      payment.transactionRef?.toLowerCase().includes(search.toLowerCase()) ||
       order?.client?.companyName?.toLowerCase().includes(search.toLowerCase())
     );
   });
@@ -213,10 +213,10 @@ export default function B2BPayments() {
 
                 <FormField
                   control={form.control}
-                  name="paymentMethod"
+                  name="paymentMode"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Payment Method *</FormLabel>
+                      <FormLabel>Payment Mode *</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger data-testid="select-method">
@@ -238,10 +238,10 @@ export default function B2BPayments() {
 
                 <FormField
                   control={form.control}
-                  name="referenceNumber"
+                  name="transactionRef"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Reference Number</FormLabel>
+                      <FormLabel>Transaction Reference</FormLabel>
                       <FormControl>
                         <Input {...field} placeholder="Transaction/Cheque number" data-testid="input-reference" />
                       </FormControl>
@@ -345,7 +345,7 @@ export default function B2BPayments() {
                           {formatCurrency(payment.amount)}
                         </span>
                         <Badge variant="outline">
-                          {paymentMethodLabels[payment.paymentMethod] || payment.paymentMethod}
+                          {paymentModeLabels[payment.paymentMode] || payment.paymentMode}
                         </Badge>
                       </div>
 
@@ -356,8 +356,8 @@ export default function B2BPayments() {
                           <Calendar className="h-4 w-4" />
                           <span>{format(new Date(payment.paymentDate), "MMM d, yyyy")}</span>
                         </div>
-                        {payment.referenceNumber && (
-                          <span>Ref: {payment.referenceNumber}</span>
+                        {payment.transactionRef && (
+                          <span>Ref: {payment.transactionRef}</span>
                         )}
                       </div>
                     </div>

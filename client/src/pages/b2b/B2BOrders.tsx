@@ -455,8 +455,7 @@ export default function B2BOrders() {
                         <Calendar className="h-4 w-4" />
                         <span>{format(new Date(order.createdAt), "MMM d, yyyy")}</span>
                       </div>
-                      {order.fabricType && <span>Fabric: {order.fabricType}</span>}
-                      {order.printingType && <span>Print: {order.printingType}</span>}
+                      {order.specialInstructions && <span className="truncate max-w-[200px]">{order.specialInstructions}</span>}
                     </div>
                   </div>
 

@@ -1652,11 +1652,15 @@ class DatabaseStorage implements IStorage {
     const id = randomUUID();
     const invoiceNumber = `INV-${Date.now().toString(36).toUpperCase()}`;
     
-    // Convert date strings to Date objects for database
+    // Convert date strings to Date objects and ensure monetary fields default to 0
     const invoiceData = {
       ...invoice,
       id,
       invoiceNumber,
+      subtotal: invoice.subtotal ?? "0",
+      taxAmount: invoice.taxAmount ?? "0",
+      discount: invoice.discount ?? "0",
+      totalAmount: invoice.totalAmount ?? "0",
       dueDate: invoice.dueDate ? (typeof invoice.dueDate === 'string' ? new Date(invoice.dueDate) : invoice.dueDate) : null,
       invoiceDate: invoice.invoiceDate ? (typeof invoice.invoiceDate === 'string' ? new Date(invoice.invoiceDate) : invoice.invoiceDate) : new Date(),
     };
