@@ -834,8 +834,25 @@ export async function registerRoutes(
     try {
       const { items, ...orderData } = req.body;
       
-      const orderCount = (await storage.getOrders()).length + 1;
-      const orderNumber = `ORD-${new Date().getFullYear()}-${String(orderCount).padStart(5, '0')}`;
+      // Generate unique order number using timestamp + random component to avoid race conditions
+      // Retry if order number already exists (unlikely but possible)
+      let orderNumber: string;
+      let attempts = 0;
+      const maxAttempts = 5;
+      
+      do {
+        const timestamp = Date.now();
+        const random = Math.floor(Math.random() * 1000);
+        orderNumber = `ORD-${new Date().getFullYear()}-${timestamp.toString().slice(-8)}${String(random).padStart(3, '0')}`;
+        
+        const existingOrder = await storage.getOrderByNumber(orderNumber);
+        if (!existingOrder) break;
+        
+        attempts++;
+        if (attempts >= maxAttempts) {
+          return res.status(500).json({ error: "Failed to generate unique order number" });
+        }
+      } while (attempts < maxAttempts);
       
       const order = await storage.createOrder(
         { ...orderData, orderNumber },
@@ -1259,8 +1276,24 @@ export async function registerRoutes(
 
   app.post("/api/complaints", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_COMPLAINTS), async (req, res) => {
     try {
-      const complaintCount = (await storage.getComplaints()).length + 1;
-      const ticketNumber = `TKT-${String(complaintCount).padStart(5, '0')}`;
+      // Generate unique ticket number using timestamp + random component to avoid race conditions
+      let ticketNumber: string;
+      let attempts = 0;
+      const maxAttempts = 5;
+      
+      do {
+        const timestamp = Date.now();
+        const random = Math.floor(Math.random() * 1000);
+        ticketNumber = `TKT-${timestamp.toString().slice(-8)}${String(random).padStart(3, '0')}`;
+        
+        const existingComplaint = await storage.getComplaintByTicketNumber(ticketNumber);
+        if (!existingComplaint) break;
+        
+        attempts++;
+        if (attempts >= maxAttempts) {
+          return res.status(500).json({ error: "Failed to generate unique ticket number" });
+        }
+      } while (attempts < maxAttempts);
 
       const order = await storage.getOrderById(req.body.orderId);
       if (!order) {
@@ -1568,8 +1601,8 @@ export async function registerRoutes(
           completed: deliveries.filter(d => d.status === "delivered" || d.status === "payment_collected").length,
         },
         revenue: {
-          total: orders.filter(o => o.paymentStatus === "paid").reduce((acc, o) => acc + parseFloat(o.totalAmount), 0),
-          pending: orders.filter(o => o.paymentStatus === "pending").reduce((acc, o) => acc + parseFloat(o.totalAmount), 0),
+          total: orders.filter(o => o.paymentStatus === "paid").reduce((acc, o) => acc + (parseFloat(o.totalAmount) || 0), 0),
+          pending: orders.filter(o => o.paymentStatus === "pending").reduce((acc, o) => acc + (parseFloat(o.totalAmount) || 0), 0),
         },
       };
 
