@@ -82,7 +82,7 @@ export interface IStorage {
   deleteProduct(id: string): Promise<boolean>;
   
   // Product Variants
-  getProductVariants(productId: string): Promise<ProductVariant[]>;
+  getProductVariants(productId?: string): Promise<ProductVariant[]>; // If productId omitted, returns all variants
   getProductVariantById(id: string): Promise<ProductVariant | undefined>;
   getProductVariantBySku(sku: string): Promise<ProductVariant | undefined>;
   createProductVariant(variant: InsertProductVariant): Promise<ProductVariant>;
@@ -428,7 +428,11 @@ class DatabaseStorage implements IStorage {
     
     if (permissionIds.length > 0) {
       await db.insert(rolePermissions)
-        .values(permissionIds.map(permissionId => ({ roleId, permissionId })));
+        .values(permissionIds.map(permissionId => ({ 
+          id: randomUUID(),
+          roleId, 
+          permissionId 
+        })));
     }
   }
 
@@ -719,12 +723,18 @@ class DatabaseStorage implements IStorage {
   }
 
   // Product Variants
-  async getProductVariants(productId: string): Promise<ProductVariant[]> {
+  async getProductVariants(productId?: string): Promise<ProductVariant[]> {
     try {
-      const result = await db.select().from(productVariants).where(eq(productVariants.productId, productId));
-      return result || [];
+      if (productId) {
+        const result = await db.select().from(productVariants).where(eq(productVariants.productId, productId));
+        return result || [];
+      } else {
+        // Return all variants if no productId provided
+        const result = await db.select().from(productVariants);
+        return result || [];
+      }
     } catch (error) {
-      console.log(`Error getting product variants for ${productId}:`, error);
+      console.log(`Error getting product variants${productId ? ` for ${productId}` : ""}:`, error);
       return [];
     }
   }
@@ -782,7 +792,15 @@ class DatabaseStorage implements IStorage {
       newQuantity = variant.stockQuantity + quantity;
     } else if (type === "outward") {
       newQuantity = variant.stockQuantity - quantity;
+      // Prevent negative stock quantities
+      if (newQuantity < 0) {
+        throw new Error(`Insufficient stock. Available: ${variant.stockQuantity}, Requested: ${quantity}`);
+      }
     } else {
+      // For adjustment, allow setting to any value (including 0, but not negative)
+      if (quantity < 0) {
+        throw new Error("Stock quantity cannot be negative");
+      }
       newQuantity = quantity;
     }
 
@@ -883,9 +901,10 @@ class DatabaseStorage implements IStorage {
         const courierPartner = ord.courierPartnerId 
           ? await this.getCourierPartnerById(ord.courierPartnerId) 
           : null;
-        const assignedUser = ord.assignedTo
-          ? await db.select().from(users).where(eq(users.id, ord.assignedTo)).then(r => r?.[0])
-          : null;
+        const assignedUserResult = ord.assignedTo
+          ? await db.select().from(users).where(eq(users.id, ord.assignedTo))
+          : [];
+        const assignedUser = assignedUserResult?.[0] || null;
         
         result.push({ 
           ...ord, 
@@ -910,9 +929,10 @@ class DatabaseStorage implements IStorage {
     const courierPartner = ord.courierPartnerId 
       ? await this.getCourierPartnerById(ord.courierPartnerId) 
       : null;
-    const assignedUser = ord.assignedTo
-      ? await db.select().from(users).where(eq(users.id, ord.assignedTo)).then(r => r[0])
-      : null;
+      const assignedUserResult = ord.assignedTo
+        ? await db.select().from(users).where(eq(users.id, ord.assignedTo))
+        : [];
+      const assignedUser = assignedUserResult?.[0] || null;
     
     return { ...ord, items, courierPartner, assignedUser };
   }
@@ -926,32 +946,46 @@ class DatabaseStorage implements IStorage {
 
   async createOrder(order: InsertOrder, items: InsertOrderItem[]): Promise<OrderWithItems> {
     const orderId = crypto.randomUUID();
-    await db.insert(orders).values({ ...order, id: orderId });
     
-    const orderResult = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
-    const created = orderResult?.[0];
-    if (!created) {
-      throw new Error("Failed to create order");
-    }
-    
-    const createdItems: OrderItem[] = [];
-    for (const item of items) {
-      const itemId = crypto.randomUUID();
-      await db.insert(orderItems).values({ ...item, id: itemId, orderId: created.id });
-      const itemResult = await db.select().from(orderItems).where(eq(orderItems.id, itemId)).limit(1);
-      if (itemResult?.[0]) {
-        createdItems.push(itemResult[0]);
+    try {
+      // Insert order
+      await db.insert(orders).values({ ...order, id: orderId });
+      
+      const orderResult = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
+      const created = orderResult?.[0];
+      if (!created) {
+        throw new Error("Failed to create order");
       }
+      
+      // Insert order items
+      const createdItems: OrderItem[] = [];
+      for (const item of items) {
+        const itemId = crypto.randomUUID();
+        await db.insert(orderItems).values({ ...item, id: itemId, orderId: created.id });
+        const itemResult = await db.select().from(orderItems).where(eq(orderItems.id, itemId)).limit(1);
+        if (itemResult?.[0]) {
+          createdItems.push(itemResult[0]);
+        }
+      }
+
+      // Insert status history
+      await db.insert(orderStatusHistory).values({
+        id: crypto.randomUUID(),
+        orderId: created.id,
+        status: created.status,
+        comment: "Order created",
+      });
+
+      return { ...created, items: createdItems };
+    } catch (error) {
+      // Cleanup: Delete order if items or history insertion failed
+      try {
+        await db.delete(orders).where(eq(orders.id, orderId));
+      } catch (cleanupError) {
+        console.error("Failed to cleanup order after error:", cleanupError);
+      }
+      throw error;
     }
-
-    await db.insert(orderStatusHistory).values({
-      id: crypto.randomUUID(),
-      orderId: created.id,
-      status: created.status,
-      comment: "Order created",
-    });
-
-    return { ...created, items: createdItems };
   }
 
   async updateOrder(id: string, order: Partial<InsertOrder>): Promise<Order | undefined> {
@@ -1120,9 +1154,10 @@ class DatabaseStorage implements IStorage {
           .orderBy(asc(complaintTimeline.createdAt));
         
         const order = await this.getOrderById(comp.orderId);
-        const assignedUser = comp.assignedTo
-          ? await db.select().from(users).where(eq(users.id, comp.assignedTo)).then(r => r?.[0])
-          : null;
+        const assignedUserResult = comp.assignedTo
+          ? await db.select().from(users).where(eq(users.id, comp.assignedTo))
+          : [];
+        const assignedUser = assignedUserResult?.[0] || null;
         
         result.push({ ...comp, timeline: timeline || [], order, assignedUser });
       }
@@ -1144,9 +1179,10 @@ class DatabaseStorage implements IStorage {
       .orderBy(asc(complaintTimeline.createdAt));
     
     const order = await this.getOrderById(comp.orderId);
-    const assignedUser = comp.assignedTo
-      ? await db.select().from(users).where(eq(users.id, comp.assignedTo)).then(r => r[0])
-      : null;
+    const assignedUserResult = comp.assignedTo
+      ? await db.select().from(users).where(eq(users.id, comp.assignedTo))
+      : [];
+    const assignedUser = assignedUserResult?.[0] || null;
     
     return { ...comp, timeline, order, assignedUser };
   }
@@ -1518,7 +1554,25 @@ class DatabaseStorage implements IStorage {
 
   async createB2BOrder(order: InsertB2BOrder, items: InsertB2BOrderItem[]): Promise<B2BOrderWithDetails> {
     const orderId = randomUUID();
-    const orderNumber = `B2B-${Date.now().toString(36).toUpperCase()}`;
+    
+    // Generate unique order number using timestamp + random component to avoid race conditions
+    const MAX_B2B_ORDER_NUMBER_ATTEMPTS = 5;
+    let orderNumber: string;
+    let attempts = 0;
+    
+    do {
+      const timestamp = Date.now();
+      const random = Math.floor(Math.random() * 1000);
+      orderNumber = `B2B-${timestamp.toString(36).toUpperCase()}${String(random).padStart(3, '0')}`;
+      
+      const existingOrder = await this.getB2BOrderByNumber(orderNumber);
+      if (!existingOrder) break;
+      
+      attempts++;
+      if (attempts >= MAX_B2B_ORDER_NUMBER_ATTEMPTS) {
+        throw new Error("Failed to generate unique B2B order number");
+      }
+    } while (attempts < MAX_B2B_ORDER_NUMBER_ATTEMPTS);
     
     await db.insert(b2bOrders).values({ 
       ...order, 
@@ -1648,36 +1702,80 @@ class DatabaseStorage implements IStorage {
 
   async createB2BPayment(payment: InsertB2BPayment): Promise<B2BPayment> {
     const id = randomUUID();
-    await db.insert(b2bPayments).values({ ...payment, id });
+    const orderId = payment.orderId;
+    let orderBeforeUpdate: B2BOrderWithDetails | undefined;
     
-    const order = await this.getB2BOrderById(payment.orderId);
-    if (order) {
-      const currentReceived = parseFloat(order.amountReceived as string) || 0;
-      const paymentAmount = parseFloat(payment.amount as string) || 0;
-      const newReceived = currentReceived + paymentAmount;
-      const totalAmount = parseFloat(order.totalAmount as string) || 0;
-      const newPending = totalAmount - newReceived;
+    try {
+      // Get order state before update
+      orderBeforeUpdate = await this.getB2BOrderById(orderId);
       
-      let newPaymentStatus: B2BOrder["paymentStatus"] = "not_paid";
-      if (newReceived >= totalAmount) {
-        newPaymentStatus = "fully_paid";
-      } else if (newReceived > 0 && newReceived < totalAmount * 0.5) {
-        newPaymentStatus = "advance_received";
-      } else if (newReceived >= totalAmount * 0.5) {
-        newPaymentStatus = "partially_paid";
+      // Insert payment record
+      await db.insert(b2bPayments).values({ ...payment, id });
+      
+      // Update order payment status
+      if (orderBeforeUpdate) {
+        const currentReceived = parseFloat(orderBeforeUpdate.amountReceived as string) || 0;
+        const paymentAmount = parseFloat(payment.amount as string) || 0;
+        const newReceived = currentReceived + paymentAmount;
+        const totalAmount = parseFloat(orderBeforeUpdate.totalAmount as string) || 0;
+        const newPending = Math.max(0, totalAmount - newReceived);
+        
+        // Payment status calculation with edge case handling
+        // Constants for payment status thresholds
+        const PARTIAL_PAYMENT_THRESHOLD = 0.5; // 50% threshold for partial payment
+        
+        let newPaymentStatus: B2BOrder["paymentStatus"] = "not_paid";
+        
+        if (totalAmount <= 0) {
+          // Edge case: If total amount is 0 or negative, consider fully paid if any payment received
+          newPaymentStatus = newReceived > 0 ? "fully_paid" : "not_paid";
+        } else if (newReceived >= totalAmount) {
+          newPaymentStatus = "fully_paid";
+        } else if (newReceived > 0) {
+          // Determine if it's advance or partial payment
+          const paymentPercentage = newReceived / totalAmount;
+          if (paymentPercentage < PARTIAL_PAYMENT_THRESHOLD) {
+            newPaymentStatus = "advance_received";
+          } else {
+            newPaymentStatus = "partially_paid";
+          }
+        }
+        
+        await db.update(b2bOrders).set({
+          amountReceived: newReceived.toString(),
+          balancePending: newPending.toString(),
+          paymentStatus: newPaymentStatus,
+          updatedAt: new Date(),
+        }).where(eq(b2bOrders.id, orderId));
       }
       
-      await db.update(b2bOrders).set({
-        amountReceived: newReceived.toString(),
-        balancePending: Math.max(0, newPending).toString(),
-        paymentStatus: newPaymentStatus,
-        updatedAt: new Date(),
-      }).where(eq(b2bOrders.id, order.id));
+      const result = await db.select().from(b2bPayments).where(eq(b2bPayments.id, id));
+      if (!result?.[0]) throw new Error("Failed to create payment");
+      return result[0];
+    } catch (error) {
+      // Rollback: Delete payment if order update failed
+      try {
+        await db.delete(b2bPayments).where(eq(b2bPayments.id, id));
+      } catch (cleanupError) {
+        console.error("Failed to cleanup payment after error:", cleanupError);
+      }
+      
+      // Rollback: Restore order state if it was updated
+      if (orderBeforeUpdate) {
+        try {
+          await db.update(b2bOrders).set({
+            amountReceived: orderBeforeUpdate.amountReceived,
+            balancePending: orderBeforeUpdate.balancePending,
+            paymentStatus: orderBeforeUpdate.paymentStatus,
+            updatedAt: new Date(),
+          }).where(eq(b2bOrders.id, orderId));
+        } catch (rollbackError) {
+          console.error("Failed to rollback order state after payment error:", rollbackError);
+        }
+      }
+      
+      throw error;
     }
-    
-    const result = await db.select().from(b2bPayments).where(eq(b2bPayments.id, id));
-    if (!result?.[0]) throw new Error("Failed to create payment");
-    return result[0];
   }
 
   // B2B Payment Milestones

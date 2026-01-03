@@ -14,7 +14,16 @@ export async function rawQuery<T = any>(query: string): Promise<T[]> {
 }
 
 export async function getBooleanValue(table: string, column: string, idColumn: string, id: string): Promise<boolean> {
-  const result = await sql(`SELECT ${column}::text as val FROM ${table} WHERE ${idColumn} = '${id}' LIMIT 1`);
+  // Validate id is a valid UUID format to prevent SQL injection
+  // Table and column names are hardcoded in the code, so they're safe
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(id)) {
+    throw new Error(`Invalid ID format: ${id}`);
+  }
+  
+  // Escape single quotes in id (though UUIDs shouldn't have them)
+  const escapedId = id.replace(/'/g, "''");
+  const result = await sql(`SELECT ${column}::text as val FROM ${table} WHERE ${idColumn} = '${escapedId}' LIMIT 1`);
   const val = result[0]?.val;
   return val === 't' || val === 'true' || val === 'TRUE' || val === '1';
 }
