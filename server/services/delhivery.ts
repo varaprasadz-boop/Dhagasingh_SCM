@@ -143,16 +143,24 @@ class DelhiveryService {
     }
 
     try {
+      // Add timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
       const response = await fetch(
         `${this.baseUrl}/c/api/pin-codes/json/?filter_codes=${pincode}`,
         {
           method: "GET",
           headers: this.getHeaders(),
+          signal: controller.signal,
         }
       );
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`HTTP error: ${response.status}`);
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const data: PincodeResponse = await response.json();
@@ -176,12 +184,22 @@ class DelhiveryService {
       };
     } catch (error) {
       console.error("Delhivery pincode check error:", error);
+      let errorMessage = "Unknown error";
+      
+      if (error instanceof Error) {
+        if (error.name === "AbortError") {
+          errorMessage = "Request timeout - Delhivery API did not respond in time";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       return { 
         serviceable: false, 
         cod: false, 
         prepaid: false, 
         pickup: false, 
-        error: error instanceof Error ? error.message : "Unknown error" 
+        error: errorMessage
       };
     }
   }
@@ -196,16 +214,23 @@ class DelhiveryService {
     }
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+      
       const response = await fetch(
         `${this.baseUrl}/waybill/api/bulk/json/?count=${count}`,
         {
           method: "GET",
           headers: this.getHeaders(),
+          signal: controller.signal,
         }
       );
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`HTTP error: ${response.status}`);
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();
@@ -220,9 +245,19 @@ class DelhiveryService {
       };
     } catch (error) {
       console.error("Delhivery waybill generation error:", error);
+      let errorMessage = "Unknown error";
+      
+      if (error instanceof Error) {
+        if (error.name === "AbortError") {
+          errorMessage = "Request timeout - Delhivery API did not respond in time";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       return { 
         success: false, 
-        error: error instanceof Error ? error.message : "Unknown error" 
+        error: errorMessage
       };
     }
   }
@@ -242,6 +277,9 @@ class DelhiveryService {
       payload.append("format", "json");
       payload.append("data", JSON.stringify(request));
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout for shipment creation
+      
       const response = await fetch(
         `${this.baseUrl}/api/cmu/create.json`,
         {
@@ -251,11 +289,15 @@ class DelhiveryService {
             "Authorization": `Token ${this.token}`,
           },
           body: payload.toString(),
+          signal: controller.signal,
         }
       );
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`HTTP error: ${response.status}`);
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const data: DelhiveryResponse = await response.json();
@@ -276,9 +318,19 @@ class DelhiveryService {
       };
     } catch (error) {
       console.error("Delhivery shipment creation error:", error);
+      let errorMessage = "Unknown error";
+      
+      if (error instanceof Error) {
+        if (error.name === "AbortError") {
+          errorMessage = "Request timeout - Delhivery API did not respond in time";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       return { 
         success: false, 
-        error: error instanceof Error ? error.message : "Unknown error" 
+        error: errorMessage
       };
     }
   }
@@ -303,16 +355,23 @@ class DelhiveryService {
     }
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
       const response = await fetch(
         `${this.trackUrl}/api/v1/packages/json/?waybill=${awbNumber}`,
         {
           method: "GET",
           headers: this.getHeaders(),
+          signal: controller.signal,
         }
       );
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`HTTP error: ${response.status}`);
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const data: TrackingResponse = await response.json();
@@ -344,9 +403,19 @@ class DelhiveryService {
       };
     } catch (error) {
       console.error("Delhivery tracking error:", error);
+      let errorMessage = "Unknown error";
+      
+      if (error instanceof Error) {
+        if (error.name === "AbortError") {
+          errorMessage = "Request timeout - Delhivery API did not respond in time";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       return { 
         success: false, 
-        error: error instanceof Error ? error.message : "Unknown error" 
+        error: errorMessage
       };
     }
   }
@@ -364,6 +433,9 @@ class DelhiveryService {
       payload.append("waybill", awbNumber);
       payload.append("cancellation", "true");
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+      
       const response = await fetch(
         `${this.baseUrl}/api/p/edit`,
         {
@@ -373,11 +445,15 @@ class DelhiveryService {
             "Authorization": `Token ${this.token}`,
           },
           body: payload.toString(),
+          signal: controller.signal,
         }
       );
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`HTTP error: ${response.status}`);
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();
@@ -387,9 +463,19 @@ class DelhiveryService {
       };
     } catch (error) {
       console.error("Delhivery cancellation error:", error);
+      let errorMessage = "Unknown error";
+      
+      if (error instanceof Error) {
+        if (error.name === "AbortError") {
+          errorMessage = "Request timeout - Delhivery API did not respond in time";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       return { 
         success: false, 
-        error: error instanceof Error ? error.message : "Unknown error" 
+        error: errorMessage
       };
     }
   }

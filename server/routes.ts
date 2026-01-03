@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { rawQuery } from "./db";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 import {
   insertRoleSchema, insertUserSchema, insertSupplierSchema,
   insertProductSchema, insertProductVariantSchema, insertCourierPartnerSchema,
@@ -10,10 +11,34 @@ import {
   insertComplaintSchema, insertComplaintTimelineSchema,
   insertInternalDeliverySchema, insertDeliveryEventSchema,
   PERMISSION_CODES,
-  type UserWithRole, type PermissionCode
+  type UserWithRole, type PermissionCode, type Order
 } from "@shared/schema";
 import Papa from "papaparse";
 import { delhiveryService, createDelhiveryShipmentFromOrder } from "./services/delhivery";
+
+// Helper function to safely parse float values
+function safeParseFloat(value: any, defaultValue: number = 0): number {
+  if (value === null || value === undefined || value === "") {
+    return defaultValue;
+  }
+  const parsed = parseFloat(String(value));
+  if (isNaN(parsed)) {
+    return defaultValue;
+  }
+  return parsed;
+}
+
+// Helper function to safely parse integer values
+function safeParseInt(value: any, defaultValue: number = 0): number {
+  if (value === null || value === undefined || value === "") {
+    return defaultValue;
+  }
+  const parsed = parseInt(String(value), 10);
+  if (isNaN(parsed)) {
+    return defaultValue;
+  }
+  return parsed;
+}
 
 declare global {
   namespace Express {
@@ -641,9 +666,9 @@ export async function registerRoutes(
             sku,
             color,
             size,
-            costPrice: parseFloat(row["Cost per item"]) || 0,
-            sellingPrice: parseFloat(row["Variant Price"]) || 0,
-            stockQuantity: parseInt(row["Variant Inventory Qty"]) || 0,
+            costPrice: safeParseFloat(row["Cost per item"], 0),
+            sellingPrice: safeParseFloat(row["Variant Price"], 0),
+            stockQuantity: safeParseInt(row["Variant Inventory Qty"], 0),
           });
         }
       }
@@ -710,27 +735,39 @@ export async function registerRoutes(
             category: productData.category,
           });
 
-          // Create variants
+          // Create variants with error handling per variant
+          const variantErrors: string[] = [];
           for (const variantData of productData.variants) {
-            await storage.createProductVariant({
-              productId: product.id,
-              sku: variantData.sku,
-              color: variantData.color,
-              size: variantData.size,
-              costPrice: variantData.costPrice.toString(),
-              sellingPrice: variantData.sellingPrice.toString(),
-              stockQuantity: variantData.stockQuantity,
-            });
+            try {
+              await storage.createProductVariant({
+                productId: product.id,
+                sku: variantData.sku,
+                color: variantData.color,
+                size: variantData.size,
+                costPrice: variantData.costPrice.toString(),
+                sellingPrice: variantData.sellingPrice.toString(),
+                stockQuantity: variantData.stockQuantity,
+              });
+            } catch (variantError: any) {
+              variantErrors.push(`Variant ${variantData.sku}: ${variantError.message}`);
+            }
           }
 
-          successCount++;
+          if (variantErrors.length > 0) {
+            errors.push({ handle, error: `Product created but some variants failed: ${variantErrors.join("; ")}` });
+          } else {
+            successCount++;
+          }
         } catch (error: any) {
-          errors.push({ handle, error: error.message });
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          errors.push({ handle, error: errorMessage });
         }
       }
 
+      // Update job status - mark as failed if all rows failed
+      const finalStatus = successCount === 0 && errors.length > 0 ? "failed" : "completed";
       await storage.updateBulkUploadJob(job.id, {
-        status: "completed",
+        status: finalStatus,
         processedRows: Object.keys(productGroups).length,
         successRows: successCount,
         errorRows: errors.length,
@@ -757,7 +794,21 @@ export async function registerRoutes(
       });
     } catch (error) {
       console.error("Products import error:", error);
-      res.status(500).json({ error: "Failed to import products" });
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+      
+      // Try to update job status to failed
+      try {
+        await storage.updateBulkUploadJob(job.id, {
+          status: "failed",
+          errorRows: 0,
+          errors: [{ error: errorMessage }],
+          completedAt: new Date(),
+        });
+      } catch (updateError) {
+        console.error("Failed to update bulk job status:", updateError);
+      }
+      
+      res.status(500).json({ error: `Failed to import products: ${errorMessage}` });
     }
   });
 
@@ -836,9 +887,9 @@ export async function registerRoutes(
       
       // Generate unique order number using timestamp + random component to avoid race conditions
       // Retry if order number already exists (unlikely but possible)
+      const MAX_ORDER_NUMBER_ATTEMPTS = 5;
       let orderNumber: string;
       let attempts = 0;
-      const maxAttempts = 5;
       
       do {
         const timestamp = Date.now();
@@ -849,10 +900,10 @@ export async function registerRoutes(
         if (!existingOrder) break;
         
         attempts++;
-        if (attempts >= maxAttempts) {
+        if (attempts >= MAX_ORDER_NUMBER_ATTEMPTS) {
           return res.status(500).json({ error: "Failed to generate unique order number" });
         }
-      } while (attempts < maxAttempts);
+      } while (attempts < MAX_ORDER_NUMBER_ATTEMPTS);
       
       const order = await storage.createOrder(
         { ...orderData, orderNumber },
@@ -958,6 +1009,21 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Updates array required" });
       }
 
+      // Validate each update has required fields
+      for (const update of updates) {
+        if (!update.orderNumber || typeof update.orderNumber !== "string") {
+          return res.status(400).json({ error: "Each update must have a valid orderNumber" });
+        }
+        if (!update.newStatus || typeof update.newStatus !== "string") {
+          return res.status(400).json({ error: "Each update must have a valid newStatus" });
+        }
+        // Validate status is a valid order status
+        const validStatuses = ["pending", "dispatched", "delivered", "rto", "returned", "refunded", "cancelled"];
+        if (!validStatuses.includes(update.newStatus)) {
+          return res.status(400).json({ error: `Invalid status: ${update.newStatus}. Valid statuses: ${validStatuses.join(", ")}` });
+        }
+      }
+
       const result = await storage.bulkUpdateOrderStatuses(updates, req.user!.id);
       
       await storage.createAuditLog({
@@ -1052,11 +1118,11 @@ export async function registerRoutes(
               row["Billing Province"],
               row["Billing Zip"],
             ].filter(Boolean).join(", "),
-            subtotal: parseFloat(row["Subtotal"]) || 0,
-            shippingCost: parseFloat(row["Shipping"]) || 0,
-            taxes: parseFloat(row["Taxes"]) || 0,
-            discount: parseFloat(row["Discount Amount"]) || 0,
-            totalAmount: parseFloat(row["Total"]) || 0,
+            subtotal: safeParseFloat(row["Subtotal"], 0),
+            shippingCost: safeParseFloat(row["Shipping"], 0),
+            taxes: safeParseFloat(row["Taxes"], 0),
+            discount: safeParseFloat(row["Discount Amount"], 0),
+            totalAmount: safeParseFloat(row["Total"], 0),
             paymentMethod: row["Payment Method"]?.toLowerCase().includes("cod") ? "cod" : "prepaid",
             paymentStatus: row["Financial Status"]?.toLowerCase() === "paid" ? "paid" : "pending",
             status: row["Fulfillment Status"]?.toLowerCase() === "fulfilled" ? "delivered" : "pending",
@@ -1066,12 +1132,14 @@ export async function registerRoutes(
         }
 
         if (row["Lineitem name"]) {
+          // Generate unique SKU if missing using UUID to prevent duplicates
+          const sku = row["Lineitem sku"]?.trim() || `SKU-${randomUUID().slice(0, 8).toUpperCase()}`;
           orderGroups[orderName].items.push({
-            sku: row["Lineitem sku"] || `SKU-${Date.now()}`,
+            sku,
             productName: row["Lineitem name"],
-            quantity: parseInt(row["Lineitem quantity"]) || 1,
-            price: parseFloat(row["Lineitem price"]) || 0,
-            compareAtPrice: parseFloat(row["Lineitem compare at price"]) || null,
+            quantity: safeParseInt(row["Lineitem quantity"], 1),
+            price: safeParseFloat(row["Lineitem price"], 0),
+            compareAtPrice: safeParseFloat(row["Lineitem compare at price"], 0) || null,
             fulfillmentStatus: row["Lineitem fulfillment status"],
           });
         }
@@ -1088,15 +1156,29 @@ export async function registerRoutes(
           const orderData = orderGroups[orderNumber];
           const { items, ...order } = orderData;
           
+          // Validate order data before creation
+          if (!order.customerName || !order.shippingAddress) {
+            errors.push({ orderNumber, error: "Missing required fields: customerName or shippingAddress" });
+            continue;
+          }
+          
+          if (!items || items.length === 0) {
+            errors.push({ orderNumber, error: "Order has no items" });
+            continue;
+          }
+          
           await storage.createOrder(order, items);
           successCount++;
         } catch (error: any) {
-          errors.push({ orderNumber, error: error.message });
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          errors.push({ orderNumber, error: errorMessage });
         }
       }
 
+      // Update job status - mark as failed if all rows failed
+      const finalStatus = successCount === 0 && errors.length > 0 ? "failed" : "completed";
       await storage.updateBulkUploadJob(job.id, {
-        status: "completed",
+        status: finalStatus,
         processedRows: Object.keys(orderGroups).length,
         successRows: successCount,
         errorRows: errors.length,
@@ -1114,7 +1196,21 @@ export async function registerRoutes(
       });
     } catch (error) {
       console.error("Import error:", error);
-      res.status(500).json({ error: "Failed to import orders" });
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+      
+      // Try to update job status to failed
+      try {
+        await storage.updateBulkUploadJob(job.id, {
+          status: "failed",
+          errorRows: 0,
+          errors: [{ error: errorMessage }],
+          completedAt: new Date(),
+        });
+      } catch (updateError) {
+        console.error("Failed to update bulk job status:", updateError);
+      }
+      
+      res.status(500).json({ error: `Failed to import orders: ${errorMessage}` });
     }
   });
 
@@ -1206,7 +1302,7 @@ export async function registerRoutes(
           const updatedVariant = await storage.getProductVariantById(variantId);
 
           // Update the variant's cost price if provided
-          const cost = parseFloat(costPrice) || 0;
+          const cost = safeParseFloat(costPrice, 0);
           if (cost > 0) {
             await storage.updateProductVariant(variantId, { costPrice: costPrice });
           }
@@ -1277,9 +1373,9 @@ export async function registerRoutes(
   app.post("/api/complaints", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_COMPLAINTS), async (req, res) => {
     try {
       // Generate unique ticket number using timestamp + random component to avoid race conditions
+      const MAX_TICKET_NUMBER_ATTEMPTS = 5;
       let ticketNumber: string;
       let attempts = 0;
-      const maxAttempts = 5;
       
       do {
         const timestamp = Date.now();
@@ -1290,10 +1386,10 @@ export async function registerRoutes(
         if (!existingComplaint) break;
         
         attempts++;
-        if (attempts >= maxAttempts) {
+        if (attempts >= MAX_TICKET_NUMBER_ATTEMPTS) {
           return res.status(500).json({ error: "Failed to generate unique ticket number" });
         }
-      } while (attempts < maxAttempts);
+      } while (attempts < MAX_TICKET_NUMBER_ATTEMPTS);
 
       const order = await storage.getOrderById(req.body.orderId);
       if (!order) {
@@ -1449,6 +1545,25 @@ export async function registerRoutes(
       const delivery = await storage.getInternalDeliveryById(req.params.id);
       if (!delivery) {
         return res.status(404).json({ error: "Delivery not found" });
+      }
+
+      // Validate status transition
+      const validTransitions: Record<string, string[]> = {
+        assigned: ["out_for_delivery", "failed"],
+        out_for_delivery: ["delivered", "payment_collected", "failed", "rto"],
+        delivered: ["payment_collected"], // Can still collect payment after delivery
+        payment_collected: [], // Final state
+        failed: ["out_for_delivery"], // Can retry
+        rto: [], // Final state
+      };
+
+      const currentStatus = delivery.status;
+      const allowedStatuses = validTransitions[currentStatus] || [];
+      
+      if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({ 
+          error: `Invalid status transition from "${currentStatus}" to "${status}". Allowed transitions: ${allowedStatuses.join(", ") || "none"}` 
+        });
       }
 
       const updateData: any = { status };
@@ -1656,7 +1771,16 @@ export async function registerRoutes(
       }
 
       const setting = await storage.getSetting("warehouse_address");
-      const warehouseAddress = setting?.value ? JSON.parse(setting.value) : null;
+      let warehouseAddress = null;
+      
+      if (setting?.value) {
+        try {
+          warehouseAddress = JSON.parse(setting.value);
+        } catch (error) {
+          console.error("Invalid warehouse address JSON:", error);
+          return res.status(400).json({ error: "Warehouse address configuration is invalid. Please reconfigure in Settings." });
+        }
+      }
 
       if (!warehouseAddress) {
         return res.status(400).json({ error: "Warehouse address not configured. Please configure in Settings." });
@@ -1777,7 +1901,7 @@ export async function registerRoutes(
       }
 
       if (result.status) {
-        const statusMap: Record<string, string> = {
+        const statusMap: Record<string, Order["status"]> = {
           "Delivered": "delivered",
           "In Transit": "dispatched",
           "Out for Delivery": "dispatched",
@@ -1787,11 +1911,13 @@ export async function registerRoutes(
         };
 
         const newStatus = statusMap[result.status];
-        if (newStatus && newStatus !== order.status) {
-          await storage.updateOrder(order.id, { status: newStatus as any });
+        // Validate that newStatus is a valid order status
+        const validStatuses: Order["status"][] = ["pending", "dispatched", "delivered", "rto", "returned", "refunded", "cancelled"];
+        if (newStatus && validStatuses.includes(newStatus) && newStatus !== order.status) {
+          await storage.updateOrder(order.id, { status: newStatus });
           await storage.updateOrderStatus(
             order.id,
-            newStatus as any,
+            newStatus,
             `Auto-updated from Delhivery tracking: ${result.status}`,
             req.user!.id
           );
