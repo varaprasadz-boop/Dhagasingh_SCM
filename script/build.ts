@@ -24,6 +24,7 @@ const allowlist = [
   "openai",
   "passport",
   "passport-local",
+  "postgres",
   "stripe",
   "uuid",
   "ws",
