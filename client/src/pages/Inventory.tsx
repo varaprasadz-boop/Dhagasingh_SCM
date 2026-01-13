@@ -1,8 +1,8 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DataTable } from "@/components/DataTable";
 import { SearchInput } from "@/components/SearchInput";
-import { ReceiveStockModal } from "@/components/ReceiveStockModal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -30,14 +30,13 @@ import { PackagePlus, PackageMinus, History, Download, Search, AlertCircle, Pack
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { ProductWithVariants, ProductVariant, StockMovement, Order, CourierPartner } from "@shared/schema";
-import type { ReceiveStockData } from "@/components/ReceiveStockModal";
 
 type VariantWithProduct = ProductVariant & { productName: string };
 
 export default function Inventory() {
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
-  const [receiveModalOpen, setReceiveModalOpen] = useState(false);
   const [manualDispatchOpen, setManualDispatchOpen] = useState(false);
 
   const [orderLookup, setOrderLookup] = useState("");
@@ -56,40 +55,6 @@ export default function Inventory() {
 
   const { data: couriers = [] } = useQuery<CourierPartner[]>({
     queryKey: ["/api/couriers"],
-  });
-
-  const receiveStockMutation = useMutation({
-    mutationFn: async (data: ReceiveStockData) => {
-      const movements = [];
-      for (const product of data.products) {
-        for (const [variantId, variantData] of Object.entries(product.variants)) {
-          if (variantData.quantity > 0) {
-            movements.push({
-              productVariantId: variantId,
-              type: "inward" as const,
-              quantity: variantData.quantity,
-              supplierId: data.supplierId,
-              costPrice: variantData.costPrice,
-              invoiceNumber: data.invoiceNumber,
-              invoiceDate: data.invoiceDate ? new Date(data.invoiceDate).toISOString() : undefined,
-              reason: "Stock received from supplier",
-            });
-          }
-        }
-      }
-      for (const movement of movements) {
-        await apiRequest("POST", "/api/stock-movements", movement);
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/stock-movements"] });
-      toast({ title: "Stock received successfully" });
-      setReceiveModalOpen(false);
-    },
-    onError: (error: Error) => {
-      toast({ title: "Failed to receive stock", description: error.message, variant: "destructive" });
-    },
   });
 
   const allVariants: VariantWithProduct[] = products.flatMap((p) =>
@@ -308,7 +273,7 @@ export default function Inventory() {
           <p className="text-muted-foreground">Track stock levels and movements</p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={() => setReceiveModalOpen(true)} data-testid="button-receive-stock">
+          <Button onClick={() => navigate("/inventory/receive-stock")} data-testid="button-receive-stock">
             <PackagePlus className="h-4 w-4 mr-2" />
             Receive Stock
           </Button>
@@ -396,14 +361,6 @@ export default function Inventory() {
           </Card>
         </TabsContent>
       </Tabs>
-
-      <ReceiveStockModal
-        open={receiveModalOpen}
-        onOpenChange={setReceiveModalOpen}
-        onReceive={(data) => {
-          receiveStockMutation.mutate(data);
-        }}
-      />
 
       <Dialog open={manualDispatchOpen} onOpenChange={(open) => {
         setManualDispatchOpen(open);

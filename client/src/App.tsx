@@ -39,6 +39,7 @@ import B2BOrders from "@/pages/b2b/B2BOrders";
 import B2BOrderDetail from "@/pages/b2b/B2BOrderDetail";
 import B2BInvoices from "@/pages/b2b/B2BInvoices";
 import B2BPayments from "@/pages/b2b/B2BPayments";
+import ReceiveStock from "@/pages/ReceiveStock";
 
 function DesktopRouter() {
   return (
@@ -46,6 +47,7 @@ function DesktopRouter() {
       <Route path="/" component={Dashboard} />
       <Route path="/orders" component={Orders} />
       <Route path="/inventory" component={Inventory} />
+      <Route path="/inventory/receive-stock" component={ReceiveStock} />
       <Route path="/products" component={Products} />
       <Route path="/suppliers" component={Suppliers} />
       <Route path="/couriers" component={Couriers} />
