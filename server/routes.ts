@@ -2119,7 +2119,7 @@ export async function registerRoutes(
         });
       }
       
-      const { items, totalAmount, advanceAmount, advanceMode, advanceDate, advanceReference, ...orderData } = parseResult.data;
+      const { items, totalAmount, advanceAmount, advanceMode, advanceDate, advanceReference, requiredDeliveryDate, ...orderData } = parseResult.data;
       
       // Calculate balance
       const balancePending = totalAmount - advanceAmount;
@@ -2128,6 +2128,7 @@ export async function registerRoutes(
       const order = await storage.createB2BOrder(
         {
           ...orderData,
+          requiredDeliveryDate: requiredDeliveryDate ? new Date(requiredDeliveryDate) : null,
           totalAmount: String(totalAmount),
           advanceAmount: String(advanceAmount),
           advanceMode,
