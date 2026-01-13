@@ -8,7 +8,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
 import { format } from "date-fns";
-import { ArrowLeft, Plus, Trash2, Upload, X, Package, DollarSign, FileText, Eye, Loader2, ImageIcon, CheckCircle } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Upload, X, Package, DollarSign, FileText, Eye, Loader2, ImageIcon, CheckCircle, ChevronsUpDown, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 import type { B2BClient, Product, ProductVariant, B2BPrintingType } from "@shared/schema";
 
 const orderItemSchema = z.object({
@@ -214,22 +217,58 @@ export default function B2BOrderCreate() {
                         control={form.control}
                         name="clientId"
                         render={({ field }) => (
-                          <FormItem>
+                          <FormItem className="flex flex-col">
                             <FormLabel>Client *</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value}>
-                              <FormControl>
-                                <SelectTrigger data-testid="select-client">
-                                  <SelectValue placeholder="Select a client" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {clients.map((client) => (
-                                  <SelectItem key={client.id} value={client.id}>
-                                    {client.companyName}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <FormControl>
+                                  <Button
+                                    variant="outline"
+                                    role="combobox"
+                                    data-testid="select-client"
+                                    className={cn(
+                                      "w-full justify-between",
+                                      !field.value && "text-muted-foreground"
+                                    )}
+                                  >
+                                    {field.value
+                                      ? clients.find((client) => client.id === field.value)?.companyName
+                                      : "Search and select a client"}
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                  </Button>
+                                </FormControl>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-[300px] p-0" align="start">
+                                <Command>
+                                  <CommandInput placeholder="Search clients..." />
+                                  <CommandList>
+                                    <CommandEmpty>No client found.</CommandEmpty>
+                                    <CommandGroup>
+                                      {clients.map((client) => (
+                                        <CommandItem
+                                          key={client.id}
+                                          value={client.companyName}
+                                          onSelect={() => {
+                                            form.setValue("clientId", client.id);
+                                          }}
+                                          data-testid={`client-option-${client.id}`}
+                                        >
+                                          <Check
+                                            className={cn(
+                                              "mr-2 h-4 w-4",
+                                              client.id === field.value
+                                                ? "opacity-100"
+                                                : "opacity-0"
+                                            )}
+                                          />
+                                          {client.companyName}
+                                        </CommandItem>
+                                      ))}
+                                    </CommandGroup>
+                                  </CommandList>
+                                </Command>
+                              </PopoverContent>
+                            </Popover>
                             <FormMessage />
                           </FormItem>
                         )}
