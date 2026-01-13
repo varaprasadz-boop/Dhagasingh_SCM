@@ -327,14 +327,8 @@ export function parseShopifyOrders(rows: ShopifyOrderRow[]): {
       const paymentStatus: "pending" | "paid" = 
         financialStatus === "paid" ? "paid" : "pending";
       
-      // Determine order status from Fulfillment Status
-      const fulfillmentStatus = (row["Fulfillment Status"] || "").toLowerCase();
-      let status: "pending" | "dispatched" | "delivered" = "pending";
-      if (fulfillmentStatus === "fulfilled") {
-        status = "delivered";
-      } else if (fulfillmentStatus === "partial" || fulfillmentStatus === "shipped") {
-        status = "dispatched";
-      }
+      // All imported orders default to pending status (ignore Fulfillment Status column)
+      const status: "pending" | "dispatched" | "delivered" = "pending";
       
       // Build shipping address
       const addressParts = [
