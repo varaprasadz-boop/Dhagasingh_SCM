@@ -99,10 +99,14 @@ export async function registerRoutes(
       const expiresAt = new Date(Date.now() + SESSION_DURATION);
       const sessionId = await storage.createSession(user.id, expiresAt);
 
+      const isReplit = !!process.env.REPL_ID;
+      const isProduction = process.env.NODE_ENV === "production";
+      const useSecureCookies = isReplit || isProduction;
+      
       res.cookie("sessionId", sessionId, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        secure: useSecureCookies,
+        sameSite: useSecureCookies ? "none" : "lax",
         expires: expiresAt,
       });
 
