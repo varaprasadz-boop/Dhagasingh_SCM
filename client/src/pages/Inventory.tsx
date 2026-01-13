@@ -1,49 +1,20 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { DataTable } from "@/components/DataTable";
 import { SearchInput } from "@/components/SearchInput";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Separator } from "@/components/ui/separator";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import { PackagePlus, PackageMinus, History, Download, Search, AlertCircle, Package, Truck, Loader2 } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { ProductWithVariants, ProductVariant, StockMovement, Order, CourierPartner } from "@shared/schema";
+import { PackagePlus, History, Download, Loader2 } from "lucide-react";
+import type { ProductWithVariants, ProductVariant, StockMovement } from "@shared/schema";
 
 type VariantWithProduct = ProductVariant & { productName: string };
 
 export default function Inventory() {
-  const { toast } = useToast();
   const [, navigate] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
-  const [manualDispatchOpen, setManualDispatchOpen] = useState(false);
-
-  const [orderLookup, setOrderLookup] = useState("");
-  const [foundOrder, setFoundOrder] = useState<Order | null>(null);
-  const [lookupError, setLookupError] = useState("");
-  const [dispatchType, setDispatchType] = useState<"fresh" | "replacement">("fresh");
-  const [selectedCourier, setSelectedCourier] = useState("");
 
   const { data: products = [], isLoading: productsLoading } = useQuery<ProductWithVariants[]>({
     queryKey: ["/api/products"],
@@ -51,10 +22,6 @@ export default function Inventory() {
 
   const { data: stockMovements = [], isLoading: movementsLoading } = useQuery<StockMovement[]>({
     queryKey: ["/api/stock-movements"],
-  });
-
-  const { data: couriers = [] } = useQuery<CourierPartner[]>({
-    queryKey: ["/api/couriers"],
   });
 
   const allVariants: VariantWithProduct[] = products.flatMap((p) =>
@@ -193,67 +160,12 @@ export default function Inventory() {
     },
   ];
 
-  const handleOrderLookup = async () => {
-    setLookupError("");
-    setFoundOrder(null);
-
-    if (!orderLookup.trim()) {
-      setLookupError("Please enter an order number");
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/orders?orderNumber=${encodeURIComponent(orderLookup)}`);
-      if (!response.ok) {
-        setLookupError("Order not found");
-        return;
-      }
-      const orders = await response.json();
-      if (orders.length === 0) {
-        setLookupError("Order not found");
-        return;
-      }
-      const order = orders[0];
-
-      if (dispatchType === "fresh" && order.status !== "pending") {
-        setLookupError("This order is already dispatched. Select 'Replacement' if there's a replacement complaint.");
-        return;
-      }
-
-      setFoundOrder(order);
-    } catch (error) {
-      setLookupError("Failed to look up order");
-    }
-  };
-
-  const handleManualDispatch = () => {
-    if (!foundOrder) return;
-    console.log("Manual dispatch:", {
-      order: foundOrder,
-      dispatchType,
-      courier: selectedCourier,
-    });
-    toast({ title: "Dispatch initiated successfully" });
-    setManualDispatchOpen(false);
-    resetDispatchForm();
-  };
-
-  const resetDispatchForm = () => {
-    setOrderLookup("");
-    setFoundOrder(null);
-    setLookupError("");
-    setDispatchType("fresh");
-    setSelectedCourier("");
-  };
-
   const totalInventoryValue = allVariants.reduce(
     (sum, v) => sum + v.stockQuantity * parseFloat(v.costPrice),
     0
   );
   const totalUnits = allVariants.reduce((sum, v) => sum + v.stockQuantity, 0);
   const lowStockCount = allVariants.filter((v) => v.stockQuantity <= (v.lowStockThreshold || 10)).length;
-
-  const inHouseCouriers = couriers.filter((c) => c.type === "in_house");
 
   const isLoading = productsLoading || movementsLoading;
 
@@ -276,10 +188,6 @@ export default function Inventory() {
           <Button onClick={() => navigate("/inventory/receive-stock")} data-testid="button-receive-stock">
             <PackagePlus className="h-4 w-4 mr-2" />
             Receive Stock
-          </Button>
-          <Button variant="outline" onClick={() => setManualDispatchOpen(true)} data-testid="button-manual-dispatch">
-            <PackageMinus className="h-4 w-4 mr-2" />
-            Manual Dispatch
           </Button>
           <Button variant="outline" data-testid="button-export-inventory">
             <Download className="h-4 w-4 mr-2" />
@@ -361,118 +269,6 @@ export default function Inventory() {
           </Card>
         </TabsContent>
       </Tabs>
-
-      <Dialog open={manualDispatchOpen} onOpenChange={(open) => {
-        setManualDispatchOpen(open);
-        if (!open) resetDispatchForm();
-      }}>
-        <DialogContent className="sm:max-w-lg" data-testid="modal-manual-dispatch">
-          <DialogHeader>
-            <DialogTitle>Manual Dispatch</DialogTitle>
-            <DialogDescription>
-              Look up an order and dispatch items manually
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Dispatch Type</Label>
-              <RadioGroup
-                value={dispatchType}
-                onValueChange={(v) => {
-                  setDispatchType(v as "fresh" | "replacement");
-                  setFoundOrder(null);
-                  setLookupError("");
-                }}
-                className="flex gap-4"
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="fresh" id="dispatch_fresh" />
-                  <Label htmlFor="dispatch_fresh" className="font-normal">Fresh Dispatch</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="replacement" id="dispatch_replacement" />
-                  <Label htmlFor="dispatch_replacement" className="font-normal">Replacement</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Order Number</Label>
-              <div className="flex gap-2">
-                <Input
-                  value={orderLookup}
-                  onChange={(e) => setOrderLookup(e.target.value)}
-                  placeholder="Enter order number (e.g., ORD-2024-001)"
-                  data-testid="input-order-lookup"
-                />
-                <Button onClick={handleOrderLookup} variant="secondary" data-testid="button-lookup-order">
-                  <Search className="h-4 w-4" />
-                </Button>
-              </div>
-              {lookupError && (
-                <div className="flex items-center gap-2 text-sm text-destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  {lookupError}
-                </div>
-              )}
-            </div>
-
-            {foundOrder && (
-              <>
-                <Separator />
-
-                <div className="p-3 bg-muted rounded-md space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium">{foundOrder.orderNumber}</span>
-                    <Badge variant="secondary">{foundOrder.status}</Badge>
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    {foundOrder.customerName} | {foundOrder.shippingAddress}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Assign to Employee</Label>
-                  <Select value={selectedCourier} onValueChange={setSelectedCourier}>
-                    <SelectTrigger data-testid="select-dispatch-employee">
-                      <SelectValue placeholder="Select internal courier" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {inHouseCouriers.length === 0 ? (
-                        <SelectItem value="none" disabled>No in-house couriers available</SelectItem>
-                      ) : (
-                        inHouseCouriers.map((courier) => (
-                          <SelectItem key={courier.id} value={courier.id}>
-                            {courier.name}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              setManualDispatchOpen(false);
-              resetDispatchForm();
-            }}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleManualDispatch}
-              disabled={!foundOrder || !selectedCourier}
-              data-testid="button-confirm-manual-dispatch"
-            >
-              <Truck className="h-4 w-4 mr-2" />
-              Dispatch
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

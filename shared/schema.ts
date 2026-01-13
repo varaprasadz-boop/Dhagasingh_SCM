@@ -734,6 +734,14 @@ export const insertBulkUploadJobSchema = createInsertSchema(bulkUploadJobs).omit
 export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true, createdAt: true });
 export const insertSettingSchema = createInsertSchema(settings).omit({ id: true, updatedAt: true });
 
+// Dispatch/Replacement payload schema for API validation
+export const dispatchPayloadSchema = z.object({
+  courierPartnerId: z.string().min(1, "Courier partner is required"),
+  courierType: z.enum(["third_party", "in_house"], { required_error: "Courier type is required" }),
+  awbNumber: z.string().optional(),
+  assignedTo: z.string().optional(),
+});
+
 // B2B Insert Schemas
 export const insertB2BClientSchema = createInsertSchema(b2bClients).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertB2BOrderSchema = createInsertSchema(b2bOrders).omit({ id: true, createdAt: true, updatedAt: true });

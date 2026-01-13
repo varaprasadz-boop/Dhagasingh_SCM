@@ -9,6 +9,7 @@ import {
   insertOrderSchema, insertOrderItemSchema, insertStockMovementSchema,
   insertComplaintSchema, insertComplaintTimelineSchema,
   insertInternalDeliverySchema, insertDeliveryEventSchema,
+  dispatchPayloadSchema,
   PERMISSION_CODES,
   type UserWithRole, type PermissionCode
 } from "@shared/schema";
@@ -900,7 +901,16 @@ export async function registerRoutes(
 
   app.post("/api/orders/:id/dispatch", authMiddleware, requirePermission(PERMISSION_CODES.DISPATCH_ORDERS), async (req, res) => {
     try {
-      const { courierPartnerId, courierType, awbNumber, assignedTo } = req.body;
+      // Validate payload with Zod schema
+      const parseResult = dispatchPayloadSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ 
+          error: "Invalid dispatch payload", 
+          details: parseResult.error.errors.map(e => e.message) 
+        });
+      }
+      
+      const { courierPartnerId, courierType, awbNumber, assignedTo } = parseResult.data;
       
       const order = await storage.getOrderById(req.params.id);
       if (!order) {
@@ -930,6 +940,118 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Dispatch error:", error);
       res.status(500).json({ error: "Failed to dispatch order" });
+    }
+  });
+
+  app.post("/api/orders/:id/replacement", authMiddleware, requirePermission(PERMISSION_CODES.DISPATCH_ORDERS), async (req, res) => {
+    try {
+      // Validate payload with Zod schema
+      const parseResult = dispatchPayloadSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ 
+          error: "Invalid dispatch payload", 
+          details: parseResult.error.errors.map(e => e.message) 
+        });
+      }
+      
+      const { courierPartnerId, courierType, awbNumber, assignedTo } = parseResult.data;
+      
+      const order = await storage.getOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      if (order.status !== "delivered") {
+        return res.status(400).json({ error: "Replacement can only be created for delivered orders" });
+      }
+
+      if (!order.items || order.items.length === 0) {
+        return res.status(400).json({ error: "Order has no items to replace" });
+      }
+
+      const stockIssues: string[] = [];
+      const missingVariants: string[] = [];
+      
+      for (const item of order.items) {
+        const variant = await storage.getProductVariantBySku(item.sku);
+        if (!variant) {
+          missingVariants.push(item.sku);
+        } else if (variant.stockQuantity < item.quantity) {
+          stockIssues.push(`${item.sku}: need ${item.quantity}, have ${variant.stockQuantity}`);
+        }
+      }
+      
+      if (missingVariants.length > 0) {
+        return res.status(400).json({ 
+          error: "Product variants not found", 
+          details: missingVariants 
+        });
+      }
+      
+      if (stockIssues.length > 0) {
+        return res.status(400).json({ 
+          error: "Insufficient stock for replacement", 
+          details: stockIssues 
+        });
+      }
+
+      for (const item of order.items) {
+        const variant = await storage.getProductVariantBySku(item.sku);
+        if (variant) {
+          const newQuantity = variant.stockQuantity - item.quantity;
+          await storage.createStockMovement({
+            productVariantId: variant.id,
+            type: "outward",
+            quantity: item.quantity,
+            previousQuantity: variant.stockQuantity,
+            newQuantity,
+            reason: `Replacement for order ${order.orderNumber}`,
+            orderId: req.params.id,
+          });
+          
+          await storage.updateProductVariant(variant.id, {
+            stockQuantity: newQuantity,
+          });
+        }
+      }
+
+      await storage.updateOrderStatus(
+        req.params.id, 
+        "dispatched", 
+        `Replacement dispatched via ${courierType === "in_house" ? "internal delivery" : "courier"}`, 
+        req.user!.id
+      );
+
+      await storage.updateOrder(req.params.id, {
+        courierPartnerId,
+        courierType,
+        awbNumber,
+        assignedTo,
+        dispatchDate: new Date(),
+      });
+
+      if (courierType === "in_house" && assignedTo) {
+        await storage.createInternalDelivery({
+          orderId: req.params.id,
+          assignedTo,
+          status: "assigned",
+        });
+      }
+
+      await storage.createAuditLog({
+        userId: req.user!.id,
+        action: "replacement",
+        module: "orders",
+        entityId: req.params.id,
+        entityType: "order",
+        newData: { courierPartnerId, courierType, awbNumber, assignedTo },
+      });
+
+      const updatedOrder = await storage.getOrderById(req.params.id);
+      res.json(updatedOrder);
+    } catch (error) {
+      console.error("Replacement error:", error);
+      res.status(500).json({ error: "Failed to create replacement" });
     }
   });
 

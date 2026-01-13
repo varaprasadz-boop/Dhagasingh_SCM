@@ -16,14 +16,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import {
   Sheet,
   SheetContent,
   SheetHeader,
@@ -33,11 +25,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Truck, Download, Eye, MapPin, Phone, Mail, Package, Clock, ArrowUpDown, Loader2, Upload } from "lucide-react";
+import { Truck, Download, Eye, MapPin, Phone, Mail, Package, Clock, ArrowUpDown, Loader2, Upload, AlertCircle, CheckCircle2, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { OrderImportModal } from "@/components/OrderImportModal";
-import type { OrderWithItems, CourierPartner, User } from "@shared/schema";
+import type { OrderWithItems, CourierPartner, User, ProductWithVariants } from "@shared/schema";
 
 type OrderStatus = "pending" | "dispatched" | "delivered" | "rto" | "returned" | "refunded";
 type SortOption = "newest" | "oldest" | "amount_high" | "amount_low";
@@ -65,7 +57,7 @@ export default function Orders() {
   const [selectedOrder, setSelectedOrder] = useState<OrderWithItems | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
-  const [dispatchDialogOpen, setDispatchDialogOpen] = useState(false);
+  const [showReplacementForm, setShowReplacementForm] = useState(false);
 
   const [dispatchForm, setDispatchForm] = useState({
     courierType: "third_party" as "third_party" | "in_house",
@@ -88,13 +80,35 @@ export default function Orders() {
     queryKey: ["/api/users"],
   });
 
+  const { data: products = [] } = useQuery<ProductWithVariants[]>({
+    queryKey: ["/api/products"],
+  });
+
+  const getStockForSku = (sku: string): { available: number; inStock: boolean } => {
+    for (const product of products) {
+      const variant = product.variants.find((v) => v.sku === sku);
+      if (variant) {
+        return { available: variant.stockQuantity, inStock: variant.stockQuantity > 0 };
+      }
+    }
+    return { available: 0, inStock: false };
+  };
+
+  const checkAllItemsInStock = (order: OrderWithItems): boolean => {
+    if (!order.items || order.items.length === 0) return false;
+    return order.items.every((item) => {
+      const stock = getStockForSku(item.sku);
+      return stock.available >= item.quantity;
+    });
+  };
+
   const dispatchMutation = useMutation({
     mutationFn: (data: { orderId: string; courierPartnerId: string; courierType: string; awbNumber?: string; assignedTo?: string }) =>
       apiRequest("POST", `/api/orders/${data.orderId}/dispatch`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       toast({ title: "Order dispatched successfully" });
-      setDispatchDialogOpen(false);
       setDetailSheetOpen(false);
       resetDispatchForm();
     },
@@ -112,6 +126,22 @@ export default function Orders() {
     },
     onError: (error: Error) => {
       toast({ title: "Failed to update status", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const replacementMutation = useMutation({
+    mutationFn: (data: { orderId: string; courierPartnerId: string; courierType: string; awbNumber?: string; assignedTo?: string }) =>
+      apiRequest("POST", `/api/orders/${data.orderId}/replacement`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      toast({ title: "Replacement dispatched successfully" });
+      setShowReplacementForm(false);
+      setDetailSheetOpen(false);
+      resetDispatchForm();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to dispatch replacement", description: error.message, variant: "destructive" });
     },
   });
 
@@ -265,6 +295,18 @@ export default function Orders() {
     });
   };
 
+  const handleReplacement = () => {
+    if (!selectedOrder || !dispatchForm.courierId) return;
+
+    replacementMutation.mutate({
+      orderId: selectedOrder.id,
+      courierPartnerId: dispatchForm.courierId,
+      courierType: dispatchForm.courierType,
+      awbNumber: dispatchForm.awbNumber || undefined,
+      assignedTo: dispatchForm.assignedTo || undefined,
+    });
+  };
+
   const handleStatusUpdate = (orderId: string, newStatus: string) => {
     updateStatusMutation.mutate({ orderId, status: newStatus });
   };
@@ -272,7 +314,7 @@ export default function Orders() {
   const handleBulkDispatch = () => {
     if (selectedOrders.length === 1) {
       setSelectedOrder(selectedOrders[0]);
-      setDispatchDialogOpen(true);
+      setDetailSheetOpen(true);
     }
   };
 
@@ -394,7 +436,13 @@ export default function Orders() {
         </CardContent>
       </Card>
 
-      <Sheet open={detailSheetOpen} onOpenChange={setDetailSheetOpen}>
+      <Sheet open={detailSheetOpen} onOpenChange={(open) => {
+        setDetailSheetOpen(open);
+        if (!open) {
+          setShowReplacementForm(false);
+          resetDispatchForm();
+        }
+      }}>
         <SheetContent className="sm:max-w-lg overflow-y-auto" data-testid="sheet-order-details">
           {selectedOrder && (
             <>
@@ -447,21 +495,39 @@ export default function Orders() {
                 <div>
                   <h3 className="text-sm font-semibold text-muted-foreground mb-2">ORDER ITEMS</h3>
                   <div className="space-y-2">
-                    {selectedOrder.items?.map((item, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-2 bg-muted rounded-md">
-                        <div className="flex items-center gap-2">
-                          <Package className="h-4 w-4 text-muted-foreground" />
-                          <div>
-                            <p className="text-sm font-medium">{item.productName}</p>
-                            <p className="text-xs text-muted-foreground font-mono">{item.sku}</p>
+                    {selectedOrder.items?.map((item, idx) => {
+                      const stock = getStockForSku(item.sku);
+                      const hasEnoughStock = stock.available >= item.quantity;
+                      return (
+                        <div key={idx} className="flex items-center justify-between p-2 bg-muted rounded-md">
+                          <div className="flex items-center gap-2">
+                            <Package className="h-4 w-4 text-muted-foreground" />
+                            <div>
+                              <p className="text-sm font-medium">{item.productName}</p>
+                              <p className="text-xs text-muted-foreground font-mono">{item.sku}</p>
+                            </div>
+                          </div>
+                          <div className="text-right space-y-1">
+                            <p className="text-sm font-medium">₹{item.price} x {item.quantity}</p>
+                            {(selectedOrder.status === "pending" || selectedOrder.status === "delivered") && (
+                              <div className="flex items-center justify-end gap-1">
+                                {hasEnoughStock ? (
+                                  <Badge variant="default" className="text-xs">
+                                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                                    {stock.available} in stock
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="destructive" className="text-xs">
+                                    <AlertCircle className="h-3 w-3 mr-1" />
+                                    {stock.available === 0 ? "Out of stock" : `Only ${stock.available}`}
+                                  </Badge>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-sm font-medium">₹{item.price} x {item.quantity}</p>
-                          <p className="text-xs text-muted-foreground">₹{parseFloat(String(item.price)) * item.quantity}</p>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -514,20 +580,116 @@ export default function Orders() {
                   </>
                 )}
 
-                <div className="pt-4 space-y-2">
+                <div className="pt-4 space-y-4">
                   {selectedOrder.status === "pending" && (
-                    <Button
-                      className="w-full"
-                      onClick={() => {
-                        setDetailSheetOpen(false);
-                        setDispatchDialogOpen(true);
-                      }}
-                      data-testid="button-dispatch-order"
-                    >
-                      <Truck className="h-4 w-4 mr-2" />
-                      Dispatch Order
-                    </Button>
+                    <div className="space-y-4 p-4 border rounded-md bg-muted/50">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-semibold flex items-center gap-2">
+                          <Truck className="h-4 w-4" />
+                          Dispatch Order
+                        </h4>
+                        {!checkAllItemsInStock(selectedOrder) && (
+                          <Badge variant="destructive" className="text-xs">
+                            <AlertCircle className="h-3 w-3 mr-1" />
+                            Insufficient Stock
+                          </Badge>
+                        )}
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <Label>Courier Type</Label>
+                        <RadioGroup
+                          value={dispatchForm.courierType}
+                          onValueChange={(v) =>
+                            setDispatchForm((prev) => ({
+                              ...prev,
+                              courierType: v as "third_party" | "in_house",
+                              courierId: "",
+                              awbNumber: "",
+                              assignedTo: "",
+                            }))
+                          }
+                          className="flex gap-4"
+                        >
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="third_party" id="type_third_inline" />
+                            <Label htmlFor="type_third_inline" className="font-normal">Third Party</Label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="in_house" id="type_internal_inline" />
+                            <Label htmlFor="type_internal_inline" className="font-normal">Internal</Label>
+                          </div>
+                        </RadioGroup>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Select Courier</Label>
+                        <Select
+                          value={dispatchForm.courierId}
+                          onValueChange={(v) => setDispatchForm((prev) => ({ ...prev, courierId: v }))}
+                        >
+                          <SelectTrigger data-testid="select-inline-courier">
+                            <SelectValue placeholder="Select courier partner" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(dispatchForm.courierType === "third_party" ? thirdPartyCouriers : inHouseCouriers).map((courier) => (
+                              <SelectItem key={courier.id} value={courier.id}>
+                                {courier.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {dispatchForm.courierType === "third_party" && (
+                        <div className="space-y-2">
+                          <Label>AWB Number</Label>
+                          <Input
+                            value={dispatchForm.awbNumber}
+                            onChange={(e) => setDispatchForm((prev) => ({ ...prev, awbNumber: e.target.value }))}
+                            placeholder="Enter AWB/Tracking number"
+                            data-testid="input-inline-awb"
+                          />
+                        </div>
+                      )}
+
+                      {dispatchForm.courierType === "in_house" && (
+                        <div className="space-y-2">
+                          <Label>Assign To</Label>
+                          <Select
+                            value={dispatchForm.assignedTo}
+                            onValueChange={(v) => setDispatchForm((prev) => ({ ...prev, assignedTo: v }))}
+                          >
+                            <SelectTrigger data-testid="select-inline-assign">
+                              <SelectValue placeholder="Select delivery person" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {deliveryUsers.map((user) => (
+                                <SelectItem key={user.id} value={user.id}>
+                                  {user.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      <Button
+                        className="w-full"
+                        onClick={handleDispatch}
+                        disabled={!dispatchForm.courierId || dispatchMutation.isPending || !checkAllItemsInStock(selectedOrder)}
+                        data-testid="button-confirm-inline-dispatch"
+                      >
+                        {dispatchMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Truck className="h-4 w-4 mr-2" />
+                        )}
+                        Dispatch Order
+                      </Button>
+                    </div>
                   )}
+
                   {selectedOrder.status === "dispatched" && (
                     <Button
                       className="w-full"
@@ -542,142 +704,135 @@ export default function Orders() {
                       Mark as Delivered
                     </Button>
                   )}
+
+                  {selectedOrder.status === "delivered" && !showReplacementForm && (
+                    <Button
+                      className="w-full"
+                      variant="outline"
+                      onClick={() => setShowReplacementForm(true)}
+                      disabled={!checkAllItemsInStock(selectedOrder)}
+                      data-testid="button-replacement-order"
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      {checkAllItemsInStock(selectedOrder) ? "Send Replacement" : "Insufficient Stock for Replacement"}
+                    </Button>
+                  )}
+
+                  {selectedOrder.status === "delivered" && showReplacementForm && (
+                    <div className="space-y-4 p-4 border rounded-md bg-muted/50">
+                      <h4 className="font-semibold">Replacement Dispatch</h4>
+                      
+                      <div className="space-y-2">
+                        <Label>Courier Type</Label>
+                        <RadioGroup
+                          value={dispatchForm.courierType}
+                          onValueChange={(v) =>
+                            setDispatchForm((prev) => ({
+                              ...prev,
+                              courierType: v as "third_party" | "in_house",
+                              courierId: "",
+                              awbNumber: "",
+                              assignedTo: "",
+                            }))
+                          }
+                          className="flex gap-4"
+                        >
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="third_party" id="repl_type_third" />
+                            <Label htmlFor="repl_type_third" className="font-normal">Third Party</Label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="in_house" id="repl_type_internal" />
+                            <Label htmlFor="repl_type_internal" className="font-normal">Internal</Label>
+                          </div>
+                        </RadioGroup>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Select Courier</Label>
+                        <Select
+                          value={dispatchForm.courierId}
+                          onValueChange={(v) => setDispatchForm((prev) => ({ ...prev, courierId: v }))}
+                        >
+                          <SelectTrigger data-testid="select-replacement-courier">
+                            <SelectValue placeholder="Select courier partner" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(dispatchForm.courierType === "third_party" ? thirdPartyCouriers : inHouseCouriers).map((courier) => (
+                              <SelectItem key={courier.id} value={courier.id}>
+                                {courier.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {dispatchForm.courierType === "third_party" && (
+                        <div className="space-y-2">
+                          <Label>AWB Number</Label>
+                          <Input
+                            value={dispatchForm.awbNumber}
+                            onChange={(e) => setDispatchForm((prev) => ({ ...prev, awbNumber: e.target.value }))}
+                            placeholder="Enter AWB/Tracking number"
+                            data-testid="input-replacement-awb"
+                          />
+                        </div>
+                      )}
+
+                      {dispatchForm.courierType === "in_house" && (
+                        <div className="space-y-2">
+                          <Label>Assign To</Label>
+                          <Select
+                            value={dispatchForm.assignedTo}
+                            onValueChange={(v) => setDispatchForm((prev) => ({ ...prev, assignedTo: v }))}
+                          >
+                            <SelectTrigger data-testid="select-replacement-assign">
+                              <SelectValue placeholder="Select delivery person" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {deliveryUsers.map((user) => (
+                                <SelectItem key={user.id} value={user.id}>
+                                  {user.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          className="flex-1"
+                          onClick={() => {
+                            setShowReplacementForm(false);
+                            resetDispatchForm();
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          className="flex-1"
+                          onClick={handleReplacement}
+                          disabled={!dispatchForm.courierId || replacementMutation.isPending}
+                          data-testid="button-confirm-replacement"
+                        >
+                          {replacementMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4 mr-2" />
+                          )}
+                          Send Replacement
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </>
           )}
         </SheetContent>
       </Sheet>
-
-      <Dialog open={dispatchDialogOpen} onOpenChange={setDispatchDialogOpen}>
-        <DialogContent className="sm:max-w-md" data-testid="modal-dispatch">
-          <DialogHeader>
-            <DialogTitle>Dispatch Order</DialogTitle>
-            <DialogDescription>
-              {selectedOrder?.orderNumber} - {selectedOrder?.customerName}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Courier Type</Label>
-              <RadioGroup
-                value={dispatchForm.courierType}
-                onValueChange={(v) =>
-                  setDispatchForm((prev) => ({
-                    ...prev,
-                    courierType: v as "third_party" | "in_house",
-                    courierId: "",
-                    awbNumber: "",
-                    assignedTo: "",
-                  }))
-                }
-                className="flex gap-4"
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="third_party" id="type_third" />
-                  <Label htmlFor="type_third" className="font-normal">Third Party</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="in_house" id="type_internal" />
-                  <Label htmlFor="type_internal" className="font-normal">Internal</Label>
-                </div>
-              </RadioGroup>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Select Courier</Label>
-              <Select
-                value={dispatchForm.courierId}
-                onValueChange={(v) => setDispatchForm((prev) => ({ ...prev, courierId: v }))}
-              >
-                <SelectTrigger data-testid="select-dispatch-courier">
-                  <SelectValue placeholder="Select courier partner" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(dispatchForm.courierType === "third_party" ? thirdPartyCouriers : inHouseCouriers).map((courier) => (
-                    <SelectItem key={courier.id} value={courier.id}>
-                      {courier.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {dispatchForm.courierType === "third_party" && (
-              <div className="space-y-2">
-                <Label>AWB Number</Label>
-                <Input
-                  value={dispatchForm.awbNumber}
-                  onChange={(e) => setDispatchForm((prev) => ({ ...prev, awbNumber: e.target.value }))}
-                  placeholder="Enter AWB/Tracking number"
-                  data-testid="input-awb-number"
-                />
-              </div>
-            )}
-
-            {dispatchForm.courierType === "in_house" && (
-              <div className="space-y-2">
-                <Label>Assign To</Label>
-                <Select
-                  value={dispatchForm.assignedTo}
-                  onValueChange={(v) => setDispatchForm((prev) => ({ ...prev, assignedTo: v }))}
-                >
-                  <SelectTrigger data-testid="select-assign-to">
-                    <SelectValue placeholder="Select delivery person" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {deliveryUsers.map((user) => (
-                      <SelectItem key={user.id} value={user.id}>
-                        {user.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label>Dispatch Date</Label>
-              <Input
-                type="date"
-                value={dispatchForm.dispatchDate}
-                onChange={(e) => setDispatchForm((prev) => ({ ...prev, dispatchDate: e.target.value }))}
-                data-testid="input-dispatch-date"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Delivery Cost (₹)</Label>
-              <Input
-                type="number"
-                value={dispatchForm.deliveryCost}
-                onChange={(e) => setDispatchForm((prev) => ({ ...prev, deliveryCost: e.target.value }))}
-                placeholder="0.00"
-                data-testid="input-delivery-cost"
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDispatchDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleDispatch} 
-              disabled={!dispatchForm.courierId || dispatchMutation.isPending}
-              data-testid="button-confirm-dispatch"
-            >
-              {dispatchMutation.isPending ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Truck className="h-4 w-4 mr-2" />
-              )}
-              Dispatch
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <OrderImportModal open={importDialogOpen} onOpenChange={setImportDialogOpen} />
     </div>
