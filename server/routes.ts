@@ -107,6 +107,7 @@ export async function registerRoutes(
         httpOnly: true,
         secure: useSecureCookies,
         sameSite: useSecureCookies ? "none" : "lax",
+        partitioned: useSecureCookies,
         expires: expiresAt,
       });
 
