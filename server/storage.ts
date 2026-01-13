@@ -276,11 +276,19 @@ export interface B2BDashboardStats {
   activeOrders: number;
   totalOrders: number;
   totalRevenue: number;
+  monthlyRevenue: number;
   amountReceived: number;
   amountPending: number;
   ordersByStatus: Record<string, number>;
   ordersByPaymentStatus: Record<string, number>;
   recentOrders: B2BOrder[];
+  recentPayments: B2BPayment[];
+  topClients: { id: string; companyName: string; totalRevenue: number; orderCount: number }[];
+  actionItems: {
+    pendingApprovals: number;
+    overduePayments: number;
+    pendingInvoices: number;
+  };
   overduePayments: { orderId: string; orderNumber: string; amount: number; dueDate: Date }[];
 }
 
@@ -1818,8 +1826,11 @@ class DatabaseStorage implements IStorage {
         : eq(b2bClients.status, "active");
       const [clientCount] = await db.select({ count: count() }).from(b2bClients).where(clientConditions);
       
+      // Get all clients for top clients calculation
+      const allClients = await db.select().from(b2bClients).where(clientConditions);
+      
       const orderConditions = createdBy ? eq(b2bOrders.createdBy, createdBy) : undefined;
-      const allOrders = await db.select().from(b2bOrders).where(orderConditions);
+      const allOrders = await db.select().from(b2bOrders).where(orderConditions).orderBy(desc(b2bOrders.createdAt));
       
       const activeStatuses = ["order_received", "design_review", "client_approval", "production_scheduled", "printing_in_progress", "quality_check", "packed"];
       const activeOrders = allOrders.filter(o => activeStatuses.includes(o.status));
@@ -1827,6 +1838,12 @@ class DatabaseStorage implements IStorage {
       const totalRevenue = allOrders.reduce((sum, o) => sum + (parseFloat(o.totalAmount as string) || 0), 0);
       const amountReceived = allOrders.reduce((sum, o) => sum + (parseFloat(o.amountReceived as string) || 0), 0);
       const amountPending = allOrders.reduce((sum, o) => sum + (parseFloat(o.balancePending as string) || 0), 0);
+      
+      // Calculate monthly revenue (current month)
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthlyOrders = allOrders.filter(o => new Date(o.createdAt) >= startOfMonth);
+      const monthlyRevenue = monthlyOrders.reduce((sum, o) => sum + (parseFloat(o.totalAmount as string) || 0), 0);
       
       const ordersByStatus: Record<string, number> = {};
       const ordersByPaymentStatus: Record<string, number> = {};
@@ -1838,16 +1855,79 @@ class DatabaseStorage implements IStorage {
       
       const recentOrders = allOrders.slice(0, 10);
       
+      // Get recent payments (for user's orders)
+      let allPayments: B2BPayment[] = [];
+      if (createdBy) {
+        // Get payments for orders created by this user
+        const userOrderIds = allOrders.map(o => o.id);
+        if (userOrderIds.length > 0) {
+          allPayments = await db.select().from(b2bPayments)
+            .where(inArray(b2bPayments.orderId, userOrderIds))
+            .orderBy(desc(b2bPayments.createdAt))
+            .limit(10);
+        }
+      } else {
+        allPayments = await db.select().from(b2bPayments).orderBy(desc(b2bPayments.createdAt)).limit(10);
+      }
+      
+      // Calculate top clients by revenue
+      const clientRevenueMap: Record<string, { revenue: number; orderCount: number }> = {};
+      for (const order of allOrders) {
+        if (!clientRevenueMap[order.clientId]) {
+          clientRevenueMap[order.clientId] = { revenue: 0, orderCount: 0 };
+        }
+        clientRevenueMap[order.clientId].revenue += parseFloat(order.totalAmount as string) || 0;
+        clientRevenueMap[order.clientId].orderCount += 1;
+      }
+      
+      const topClients = allClients
+        .map(c => ({
+          id: c.id,
+          companyName: c.companyName,
+          totalRevenue: clientRevenueMap[c.id]?.revenue || 0,
+          orderCount: clientRevenueMap[c.id]?.orderCount || 0,
+        }))
+        .sort((a, b) => b.totalRevenue - a.totalRevenue)
+        .slice(0, 5);
+      
+      // Calculate action items
+      const pendingApprovals = allOrders.filter(o => o.status === "client_approval").length;
+      const overduePaymentsCount = allOrders.filter(o => o.paymentStatus === "overdue").length;
+      
+      // Get pending invoices (draft invoices for user's orders)
+      let pendingInvoices = 0;
+      if (createdBy) {
+        // Filter draft invoices by user's order IDs
+        const userOrderIds = allOrders.map(o => o.id);
+        if (userOrderIds.length > 0) {
+          const draftInvoices = await db.select({ count: count() }).from(b2bInvoices)
+            .where(and(eq(b2bInvoices.status, "draft"), inArray(b2bInvoices.orderId, userOrderIds)));
+          pendingInvoices = draftInvoices[0]?.count || 0;
+        }
+      } else {
+        const draftInvoices = await db.select({ count: count() }).from(b2bInvoices)
+          .where(eq(b2bInvoices.status, "draft"));
+        pendingInvoices = draftInvoices[0]?.count || 0;
+      }
+      
       return {
         totalClients: clientCount?.count || 0,
         activeOrders: activeOrders.length,
         totalOrders: allOrders.length,
         totalRevenue,
+        monthlyRevenue,
         amountReceived,
         amountPending,
         ordersByStatus,
         ordersByPaymentStatus,
         recentOrders,
+        recentPayments: allPayments,
+        topClients,
+        actionItems: {
+          pendingApprovals,
+          overduePayments: overduePaymentsCount,
+          pendingInvoices,
+        },
         overduePayments: [],
       };
     } catch (error) {
@@ -1857,11 +1937,19 @@ class DatabaseStorage implements IStorage {
         activeOrders: 0,
         totalOrders: 0,
         totalRevenue: 0,
+        monthlyRevenue: 0,
         amountReceived: 0,
         amountPending: 0,
         ordersByStatus: {},
         ordersByPaymentStatus: {},
         recentOrders: [],
+        recentPayments: [],
+        topClients: [],
+        actionItems: {
+          pendingApprovals: 0,
+          overduePayments: 0,
+          pendingInvoices: 0,
+        },
         overduePayments: [],
       };
     }

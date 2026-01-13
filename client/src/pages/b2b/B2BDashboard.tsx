@@ -6,6 +6,8 @@ import { Building2, ShoppingCart, DollarSign, Clock, TrendingUp, AlertTriangle }
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import type { B2BOrder } from "@shared/schema";
+import { useAuth } from "@/contexts/AuthContext";
+import B2BSalesAgentDashboard from "./B2BSalesAgentDashboard";
 
 interface DashboardStats {
   totalClients: number;
@@ -42,9 +44,17 @@ const paymentStatusLabels: Record<string, string> = {
 };
 
 export default function B2BDashboard() {
+  const { hasPermission, isSuperAdmin } = useAuth();
+  const canViewAllB2BData = isSuperAdmin || hasPermission("view_all_b2b_data");
+  
   const { data: stats, isLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/b2b/dashboard"],
   });
+
+  // Show sales agent dashboard for users who can only see their own data
+  if (!canViewAllB2BData) {
+    return <B2BSalesAgentDashboard />;
+  }
 
   if (isLoading) {
     return (
