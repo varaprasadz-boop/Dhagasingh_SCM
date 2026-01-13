@@ -40,6 +40,39 @@ Run: `npx tsx scripts/generate-testing-excel.ts`
 
 ## Development Notes
 
+### B2B Order Creation Flow (Enhanced)
+The B2B order creation uses a dedicated landing page (`/b2b/orders/new`) with a 4-step wizard:
+1. **Order Details**: Client selection, printing type, artwork status, priority, product/variant selection with quantities
+2. **Finance Details**: Total amount, advance payment (mandatory), payment mode, date, and reference
+3. **Delivery Details**: Delivery address, city, state, PIN code, required date, special instructions
+4. **Review**: Order summary with balance calculation and create button
+
+**Key Validations**:
+- Advance payment is mandatory and must be > 0
+- Advance amount cannot exceed total amount
+- At least one product/variant is required
+- Delivery address is required
+
+**Financial Fields**:
+- `totalAmount`: Manual entry of total order value
+- `advanceAmount`: Mandatory advance received
+- `advanceMode`: Payment method (cash, upi, bank_transfer, card, cheque, online_gateway)
+- `advanceDate`: Date advance was received
+- `advanceReference`: Transaction reference (optional)
+- `balancePending`: Auto-calculated (totalAmount - amountReceived)
+- `paymentStatus`: advance_received (default), partially_paid, fully_paid
+
+### B2B Dispatch Process
+- Mirrors eCommerce dispatch: validates stock, deducts inventory for each variant
+- Creates stock movement records with reason "B2B Order dispatch"
+- Captures courier details (partner, type, AWB, assigned user)
+- Creates internal delivery record for in-house courier
+
+### B2B Printing Types (Super Admin)
+- Configurable printing types in Settings > B2B Printing tab
+- Super admins can add, edit, toggle active/inactive, and delete types
+- Printing types appear in order creation dropdown
+
 ### B2B Module API Notes
 - **Date fields**: All date fields (dueDate, invoiceDate, paymentDate, paidAt) accept ISO date strings and are converted to Date objects in storage layer
 - **Payment field naming**: Use `paymentMode` not `paymentMethod` in API requests
@@ -48,6 +81,7 @@ Run: `npx tsx scripts/generate-testing-excel.ts`
   - B2B invoices require `orderId`, `clientId`, `invoiceType`
   - B2B payments require `orderId`, `amount`, `paymentMode`
 - **Permission structure**: B2B uses VIEW_ALL_B2B_DATA permission to allow managers to see all data; regular B2B employees only see their own clients/orders
+- **Artwork limit**: Maximum 10 files per order (enforced at API level)
 
 ## System Architecture
 
