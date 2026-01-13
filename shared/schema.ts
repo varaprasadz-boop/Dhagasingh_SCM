@@ -25,6 +25,17 @@ export const b2bInvoiceTypeEnum = pgEnum("b2b_invoice_type", ["proforma", "tax"]
 export const b2bInvoiceStatusEnum = pgEnum("b2b_invoice_status", ["draft", "sent", "paid", "cancelled"]);
 export const b2bPaymentStatusEnum = pgEnum("b2b_payment_status", ["not_paid", "advance_received", "partially_paid", "fully_paid", "overdue"]);
 export const b2bPaymentModeEnum = pgEnum("b2b_payment_mode", ["cash", "upi", "bank_transfer", "card", "cheque", "online_gateway"]);
+export const b2bArtworkStatusEnum = pgEnum("b2b_artwork_status", ["pending", "received", "approved", "revision_needed"]);
+
+// B2B Printing Types (Super Admin configurable)
+export const b2bPrintingTypes = pgTable("b2b_printing_types", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
 
 // Permissions table - stores all available permissions in the system
 export const permissions = pgTable("permissions", {
@@ -351,6 +362,8 @@ export const b2bOrders = pgTable("b2b_orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderNumber: text("order_number").notNull().unique(),
   clientId: varchar("client_id").notNull().references(() => b2bClients.id),
+  printingTypeId: varchar("printing_type_id").references(() => b2bPrintingTypes.id),
+  artworkStatus: b2bArtworkStatusEnum("artwork_status").default("pending").notNull(),
   eventType: text("event_type"),
   deliveryAddress: text("delivery_address").notNull(),
   deliveryCity: text("delivery_city"),
@@ -360,22 +373,31 @@ export const b2bOrders = pgTable("b2b_orders", {
   requiredDeliveryDate: timestamp("required_delivery_date"),
   priority: b2bOrderPriorityEnum("priority").default("normal").notNull(),
   status: b2bOrderStatusEnum("status").default("order_received").notNull(),
+  // Financial fields
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).default("0").notNull(),
+  advanceAmount: decimal("advance_amount", { precision: 10, scale: 2 }).default("0").notNull(),
+  advanceMode: b2bPaymentModeEnum("advance_mode"),
+  advanceDate: timestamp("advance_date"),
+  advanceReference: text("advance_reference"),
+  paymentStatus: b2bPaymentStatusEnum("payment_status").default("advance_received").notNull(),
+  amountReceived: decimal("amount_received", { precision: 10, scale: 2 }).default("0").notNull(),
+  balancePending: decimal("balance_pending", { precision: 10, scale: 2 }).default("0").notNull(),
+  // Legacy fields kept for compatibility
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).default("0").notNull(),
   printingCost: decimal("printing_cost", { precision: 10, scale: 2 }).default("0").notNull(),
   designCharges: decimal("design_charges", { precision: 10, scale: 2 }).default("0").notNull(),
   discount: decimal("discount", { precision: 10, scale: 2 }).default("0").notNull(),
   taxRate: decimal("tax_rate", { precision: 5, scale: 2 }).default("18").notNull(),
   taxAmount: decimal("tax_amount", { precision: 10, scale: 2 }).default("0").notNull(),
-  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).default("0").notNull(),
-  paymentStatus: b2bPaymentStatusEnum("payment_status").default("not_paid").notNull(),
-  amountReceived: decimal("amount_received", { precision: 10, scale: 2 }).default("0").notNull(),
-  balancePending: decimal("balance_pending", { precision: 10, scale: 2 }).default("0").notNull(),
   specialInstructions: text("special_instructions"),
   internalNotes: text("internal_notes"),
   cancellationReason: text("cancellation_reason"),
   delayReason: text("delay_reason"),
+  // Dispatch fields
   courierPartnerId: varchar("courier_partner_id").references(() => courierPartners.id),
+  courierType: courierTypeEnum("courier_type"),
   awbNumber: text("awb_number"),
+  assignedTo: varchar("assigned_to").references(() => users.id),
   dispatchDate: timestamp("dispatch_date"),
   deliveryDate: timestamp("delivery_date"),
   createdBy: varchar("created_by").references(() => users.id),
@@ -383,21 +405,28 @@ export const b2bOrders = pgTable("b2b_orders", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// B2B Order Items (products with customization)
+// B2B Order Items (products with variants)
 export const b2bOrderItems = pgTable("b2b_order_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderId: varchar("order_id").notNull().references(() => b2bOrders.id, { onDelete: "cascade" }),
   productId: varchar("product_id").references(() => products.id),
-  apparelType: text("apparel_type").notNull(),
-  color: text("color").notNull(),
+  productVariantId: varchar("product_variant_id").references(() => productVariants.id),
+  // Variant snapshot for historical record
+  variantSku: text("variant_sku"),
+  variantColor: text("variant_color"),
+  variantSize: text("variant_size"),
+  quantity: integer("quantity").notNull(),
+  // Legacy fields for backward compatibility
+  apparelType: text("apparel_type"),
+  color: text("color"),
   fabric: text("fabric"),
-  printingType: b2bPrintingTypeEnum("printing_type").notNull(),
+  printingType: b2bPrintingTypeEnum("printing_type"),
   printPlacement: text("print_placement"),
-  sizeBreakup: jsonb("size_breakup").notNull(),
-  totalQuantity: integer("total_quantity").notNull(),
-  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
-  printingCostPerUnit: decimal("printing_cost_per_unit", { precision: 10, scale: 2 }).default("0").notNull(),
-  totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
+  sizeBreakup: jsonb("size_breakup"),
+  totalQuantity: integer("total_quantity"),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }),
+  printingCostPerUnit: decimal("printing_cost_per_unit", { precision: 10, scale: 2 }).default("0"),
+  totalPrice: decimal("total_price", { precision: 10, scale: 2 }),
   specialInstructions: text("special_instructions"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -616,6 +645,10 @@ export const b2bOrdersRelations = relations(b2bOrders, ({ one, many }) => ({
     fields: [b2bOrders.clientId],
     references: [b2bClients.id],
   }),
+  printingType: one(b2bPrintingTypes, {
+    fields: [b2bOrders.printingTypeId],
+    references: [b2bPrintingTypes.id],
+  }),
   items: many(b2bOrderItems),
   artwork: many(b2bOrderArtwork),
   statusHistory: many(b2bOrderStatusHistory),
@@ -626,9 +659,15 @@ export const b2bOrdersRelations = relations(b2bOrders, ({ one, many }) => ({
     fields: [b2bOrders.courierPartnerId],
     references: [courierPartners.id],
   }),
+  assignedUser: one(users, {
+    fields: [b2bOrders.assignedTo],
+    references: [users.id],
+    relationName: "assignedUser",
+  }),
   createdByUser: one(users, {
     fields: [b2bOrders.createdBy],
     references: [users.id],
+    relationName: "createdByUser",
   }),
 }));
 
@@ -640,6 +679,10 @@ export const b2bOrderItemsRelations = relations(b2bOrderItems, ({ one, many }) =
   product: one(products, {
     fields: [b2bOrderItems.productId],
     references: [products.id],
+  }),
+  productVariant: one(productVariants, {
+    fields: [b2bOrderItems.productVariantId],
+    references: [productVariants.id],
   }),
   artwork: many(b2bOrderArtwork),
 }));
@@ -742,7 +785,42 @@ export const dispatchPayloadSchema = z.object({
   assignedTo: z.string().optional(),
 });
 
+// B2B Order Item for new order creation
+export const b2bOrderItemInputSchema = z.object({
+  productId: z.string().min(1, "Product is required"),
+  productVariantId: z.string().min(1, "Variant is required"),
+  quantity: z.number().min(1, "Quantity must be at least 1"),
+});
+
+// B2B Order Creation payload schema with mandatory advance payment
+export const createB2BOrderPayloadSchema = z.object({
+  clientId: z.string().min(1, "Client is required"),
+  printingTypeId: z.string().optional(),
+  artworkStatus: z.enum(["pending", "received", "approved", "revision_needed"]).default("pending"),
+  priority: z.enum(["normal", "urgent"]).default("normal"),
+  deliveryAddress: z.string().min(1, "Delivery address is required"),
+  deliveryCity: z.string().optional(),
+  deliveryState: z.string().optional(),
+  deliveryZip: z.string().optional(),
+  requiredDeliveryDate: z.string().optional(),
+  specialInstructions: z.string().optional(),
+  // Financial fields
+  totalAmount: z.number().positive("Total amount must be greater than 0"),
+  advanceAmount: z.number().positive("Advance amount is required and must be greater than 0"),
+  advanceMode: z.enum(["cash", "upi", "bank_transfer", "card", "cheque", "online_gateway"], {
+    required_error: "Advance payment mode is required"
+  }),
+  advanceDate: z.string().min(1, "Advance date is required"),
+  advanceReference: z.string().optional(),
+  // Items array
+  items: z.array(b2bOrderItemInputSchema).min(1, "At least one product item is required"),
+}).refine(data => data.advanceAmount <= data.totalAmount, {
+  message: "Advance amount cannot exceed total amount",
+  path: ["advanceAmount"],
+});
+
 // B2B Insert Schemas
+export const insertB2BPrintingTypeSchema = createInsertSchema(b2bPrintingTypes).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertB2BClientSchema = createInsertSchema(b2bClients).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertB2BOrderSchema = createInsertSchema(b2bOrders).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertB2BOrderItemSchema = createInsertSchema(b2bOrderItems).omit({ id: true, createdAt: true });
@@ -793,6 +871,8 @@ export type Setting = typeof settings.$inferSelect;
 export type InsertSetting = z.infer<typeof insertSettingSchema>;
 
 // B2B Types
+export type B2BPrintingType = typeof b2bPrintingTypes.$inferSelect;
+export type InsertB2BPrintingType = z.infer<typeof insertB2BPrintingTypeSchema>;
 export type B2BClient = typeof b2bClients.$inferSelect;
 export type InsertB2BClient = z.infer<typeof insertB2BClientSchema>;
 export type B2BOrder = typeof b2bOrders.$inferSelect;

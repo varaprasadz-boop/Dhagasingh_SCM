@@ -7,7 +7,7 @@ import {
   orders, orderItems, orderStatusHistory, stockMovements,
   complaints, complaintTimeline, internalDeliveries, deliveryEvents,
   bulkUploadJobs, auditLogs, settings,
-  b2bClients, b2bOrders, b2bOrderItems, b2bOrderArtwork, b2bOrderStatusHistory,
+  b2bPrintingTypes, b2bClients, b2bOrders, b2bOrderItems, b2bOrderArtwork, b2bOrderStatusHistory,
   b2bInvoices, b2bPaymentMilestones, b2bPayments,
   type User, type InsertUser, type Role, type InsertRole,
   type Permission, type InsertPermission, type RolePermission, type InsertRolePermission,
@@ -20,6 +20,7 @@ import {
   type AuditLog, type InsertAuditLog, type Setting, type InsertSetting,
   type UserWithRole, type RoleWithPermissions, type ProductWithVariants,
   type OrderWithItems, type ComplaintWithTimeline, type InternalDeliveryWithDetails,
+  type B2BPrintingType, type InsertB2BPrintingType,
   type B2BClient, type InsertB2BClient, type B2BOrder, type InsertB2BOrder,
   type B2BOrderItem, type InsertB2BOrderItem, type B2BOrderArtwork, type InsertB2BOrderArtwork,
   type B2BOrderStatusHistory, type InsertB2BOrderStatusHistory,
@@ -145,6 +146,13 @@ export interface IStorage {
   
   // Seed data
   seedDefaultData(): Promise<void>;
+  
+  // B2B Printing Types (Super Admin configurable)
+  getB2BPrintingTypes(): Promise<B2BPrintingType[]>;
+  getB2BPrintingTypeById(id: string): Promise<B2BPrintingType | undefined>;
+  createB2BPrintingType(printingType: InsertB2BPrintingType): Promise<B2BPrintingType>;
+  updateB2BPrintingType(id: string, printingType: Partial<InsertB2BPrintingType>): Promise<B2BPrintingType | undefined>;
+  deleteB2BPrintingType(id: string): Promise<boolean>;
   
   // B2B Clients
   getB2BClients(filters?: B2BClientFilters): Promise<B2BClient[]>;
@@ -1416,6 +1424,45 @@ class DatabaseStorage implements IStorage {
     return created;
   }
 
+  // B2B Printing Types (Super Admin configurable)
+  async getB2BPrintingTypes(): Promise<B2BPrintingType[]> {
+    try {
+      const result = await db.select().from(b2bPrintingTypes).orderBy(asc(b2bPrintingTypes.name));
+      return result || [];
+    } catch (error) {
+      console.error("Error fetching B2B printing types:", error);
+      return [];
+    }
+  }
+
+  async getB2BPrintingTypeById(id: string): Promise<B2BPrintingType | undefined> {
+    try {
+      const result = await db.select().from(b2bPrintingTypes).where(eq(b2bPrintingTypes.id, id));
+      return result?.[0];
+    } catch (error) {
+      console.error("Error fetching B2B printing type:", error);
+      return undefined;
+    }
+  }
+
+  async createB2BPrintingType(printingType: InsertB2BPrintingType): Promise<B2BPrintingType> {
+    const id = randomUUID();
+    await db.insert(b2bPrintingTypes).values({ ...printingType, id });
+    const created = await this.getB2BPrintingTypeById(id);
+    if (!created) throw new Error("Failed to create B2B printing type");
+    return created;
+  }
+
+  async updateB2BPrintingType(id: string, printingType: Partial<InsertB2BPrintingType>): Promise<B2BPrintingType | undefined> {
+    await db.update(b2bPrintingTypes).set({ ...printingType, updatedAt: new Date() }).where(eq(b2bPrintingTypes.id, id));
+    return this.getB2BPrintingTypeById(id);
+  }
+
+  async deleteB2BPrintingType(id: string): Promise<boolean> {
+    await db.delete(b2bPrintingTypes).where(eq(b2bPrintingTypes.id, id));
+    return true;
+  }
+
   // B2B Clients
   async getB2BClients(filters?: B2BClientFilters): Promise<B2BClient[]> {
     try {
@@ -1552,12 +1599,31 @@ class DatabaseStorage implements IStorage {
       ...order, 
       id: orderId, 
       orderNumber,
-      balancePending: order.totalAmount || "0"
     });
     
+    // Create order items with variant snapshots
     for (const item of items) {
       const itemId = randomUUID();
-      await db.insert(b2bOrderItems).values({ ...item, id: itemId, orderId });
+      
+      // If productVariantId is provided, fetch variant details for snapshot
+      let variantSnapshot: { variantSku?: string; variantColor?: string; variantSize?: string } = {};
+      if (item.productVariantId) {
+        const variant = await this.getProductVariantById(item.productVariantId);
+        if (variant) {
+          variantSnapshot = {
+            variantSku: variant.sku,
+            variantColor: variant.color || undefined,
+            variantSize: variant.size || undefined,
+          };
+        }
+      }
+      
+      await db.insert(b2bOrderItems).values({ 
+        ...item, 
+        ...variantSnapshot,
+        id: itemId, 
+        orderId 
+      });
     }
     
     await db.insert(b2bOrderStatusHistory).values({

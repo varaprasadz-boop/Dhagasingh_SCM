@@ -9,7 +9,7 @@ import {
   insertOrderSchema, insertOrderItemSchema, insertStockMovementSchema,
   insertComplaintSchema, insertComplaintTimelineSchema,
   insertInternalDeliverySchema, insertDeliveryEventSchema,
-  dispatchPayloadSchema,
+  dispatchPayloadSchema, createB2BOrderPayloadSchema,
   PERMISSION_CODES,
   type UserWithRole, type PermissionCode
 } from "@shared/schema";
@@ -1910,6 +1910,74 @@ export async function registerRoutes(
     return userPermissions.includes(PERMISSION_CODES.VIEW_ALL_B2B_DATA);
   }
   
+  // B2B Printing Types (Super Admin only)
+  app.get("/api/b2b/printing-types", authMiddleware, async (req, res) => {
+    try {
+      const printingTypes = await storage.getB2BPrintingTypes();
+      res.json(printingTypes);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch printing types" });
+    }
+  });
+
+  app.get("/api/b2b/printing-types/:id", authMiddleware, async (req, res) => {
+    try {
+      const printingType = await storage.getB2BPrintingTypeById(req.params.id);
+      if (!printingType) {
+        return res.status(404).json({ error: "Printing type not found" });
+      }
+      res.json(printingType);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch printing type" });
+    }
+  });
+
+  app.post("/api/b2b/printing-types", authMiddleware, async (req, res) => {
+    try {
+      // Only super admin can create printing types
+      if (!req.user!.isSuperAdmin) {
+        return res.status(403).json({ error: "Only super admin can manage printing types" });
+      }
+      const printingType = await storage.createB2BPrintingType(req.body);
+      res.status(201).json(printingType);
+    } catch (error) {
+      console.error("Error creating printing type:", error);
+      res.status(500).json({ error: "Failed to create printing type" });
+    }
+  });
+
+  app.patch("/api/b2b/printing-types/:id", authMiddleware, async (req, res) => {
+    try {
+      // Only super admin can update printing types
+      if (!req.user!.isSuperAdmin) {
+        return res.status(403).json({ error: "Only super admin can manage printing types" });
+      }
+      const printingType = await storage.updateB2BPrintingType(req.params.id, req.body);
+      if (!printingType) {
+        return res.status(404).json({ error: "Printing type not found" });
+      }
+      res.json(printingType);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update printing type" });
+    }
+  });
+
+  app.delete("/api/b2b/printing-types/:id", authMiddleware, async (req, res) => {
+    try {
+      // Only super admin can delete printing types
+      if (!req.user!.isSuperAdmin) {
+        return res.status(403).json({ error: "Only super admin can manage printing types" });
+      }
+      const success = await storage.deleteB2BPrintingType(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Printing type not found" });
+      }
+      res.json({ message: "Printing type deleted successfully" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete printing type" });
+    }
+  });
+  
   // B2B Clients
   app.get("/api/b2b/clients", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_CLIENTS), async (req, res) => {
     try {
@@ -2034,10 +2102,42 @@ export async function registerRoutes(
 
   app.post("/api/b2b/orders", authMiddleware, requirePermission(PERMISSION_CODES.CREATE_B2B_ORDERS), async (req, res) => {
     try {
-      const { items, ...orderData } = req.body;
+      // Validate payload with Zod schema (mandatory advance payment)
+      const parseResult = createB2BOrderPayloadSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({
+          error: "Invalid order data",
+          details: parseResult.error.errors.map(e => ({
+            field: e.path.join('.'),
+            message: e.message
+          }))
+        });
+      }
+      
+      const { items, totalAmount, advanceAmount, advanceMode, advanceDate, advanceReference, ...orderData } = parseResult.data;
+      
+      // Calculate balance
+      const balancePending = totalAmount - advanceAmount;
+      
+      // Create order with financial data
       const order = await storage.createB2BOrder(
-        { ...orderData, createdBy: req.user!.id },
-        items || []
+        {
+          ...orderData,
+          totalAmount: String(totalAmount),
+          advanceAmount: String(advanceAmount),
+          advanceMode,
+          advanceDate: new Date(advanceDate),
+          advanceReference,
+          amountReceived: String(advanceAmount),
+          balancePending: String(balancePending),
+          paymentStatus: "advance_received",
+          createdBy: req.user!.id,
+        },
+        items.map(item => ({
+          productId: item.productId,
+          productVariantId: item.productVariantId,
+          quantity: item.quantity,
+        }))
       );
       res.status(201).json(order);
     } catch (error) {
@@ -2113,6 +2213,13 @@ export async function registerRoutes(
       if (!canViewAll && existingOrder.createdBy !== req.user!.id) {
         return res.status(403).json({ error: "You can only add artwork to your own orders" });
       }
+      
+      // Check 10-file limit
+      const currentArtworkCount = existingOrder.artwork?.length || 0;
+      if (currentArtworkCount >= 10) {
+        return res.status(400).json({ error: "Maximum 10 artwork files allowed per order" });
+      }
+      
       const artwork = await storage.addB2BOrderArtwork({
         ...req.body,
         orderId: req.params.id,
@@ -2143,6 +2250,154 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete artwork" });
+    }
+  });
+
+  // B2B Order Dispatch (with stock deduction - mirrors eCommerce)
+  app.post("/api/b2b/orders/:id/dispatch", authMiddleware, requirePermission(PERMISSION_CODES.UPDATE_B2B_ORDER_STATUS), async (req, res) => {
+    try {
+      // Validate payload with dispatch schema
+      const parseResult = dispatchPayloadSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ 
+          error: "Invalid dispatch payload", 
+          details: parseResult.error.errors.map(e => e.message) 
+        });
+      }
+      
+      const { courierPartnerId, courierType, awbNumber, assignedTo } = parseResult.data;
+      
+      const order = await storage.getB2BOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      // Check ownership
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && order.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only dispatch your own orders" });
+      }
+      
+      // Validate order items have sufficient stock (only for items with variants)
+      const stockIssues: string[] = [];
+      const missingVariants: string[] = [];
+      
+      for (const item of order.items || []) {
+        if (item.productVariantId) {
+          const variant = await storage.getProductVariantById(item.productVariantId);
+          if (!variant) {
+            missingVariants.push(item.variantSku || item.productVariantId);
+          } else if (variant.stockQuantity < item.quantity) {
+            stockIssues.push(`${item.variantSku || variant.sku}: need ${item.quantity}, have ${variant.stockQuantity}`);
+          }
+        }
+      }
+      
+      if (missingVariants.length > 0) {
+        return res.status(400).json({ 
+          error: "Product variants not found", 
+          details: missingVariants 
+        });
+      }
+      
+      if (stockIssues.length > 0) {
+        return res.status(400).json({ 
+          error: "Insufficient stock for dispatch", 
+          details: stockIssues 
+        });
+      }
+      
+      // Deduct inventory for items with variants
+      for (const item of order.items || []) {
+        if (item.productVariantId) {
+          const variant = await storage.getProductVariantById(item.productVariantId);
+          if (variant) {
+            const newQuantity = variant.stockQuantity - item.quantity;
+            await storage.createStockMovement({
+              productVariantId: variant.id,
+              type: "outward",
+              quantity: item.quantity,
+              previousQuantity: variant.stockQuantity,
+              newQuantity,
+              reason: `B2B Order dispatch: ${order.orderNumber}`,
+            });
+            
+            await storage.updateProductVariant(variant.id, {
+              stockQuantity: newQuantity,
+            });
+          }
+        }
+      }
+      
+      // Update order with dispatch info
+      await storage.updateB2BOrder(req.params.id, {
+        courierPartnerId,
+        courierType,
+        awbNumber,
+        assignedTo,
+        dispatchDate: new Date(),
+      });
+      
+      // Update order status to dispatched
+      await storage.updateB2BOrderStatus(req.params.id, "dispatched", "Order dispatched", req.user!.id);
+      
+      // Create internal delivery if in-house courier
+      if (courierType === "in_house" && assignedTo) {
+        await storage.createInternalDelivery({
+          orderId: req.params.id,
+          assignedTo,
+          status: "assigned",
+        });
+      }
+      
+      const updatedOrder = await storage.getB2BOrderById(req.params.id);
+      res.json(updatedOrder);
+    } catch (error) {
+      console.error("B2B Dispatch error:", error);
+      res.status(500).json({ error: "Failed to dispatch order" });
+    }
+  });
+
+  // B2B Payment Status Update
+  app.patch("/api/b2b/orders/:id/payment-status", authMiddleware, requirePermission(PERMISSION_CODES.EDIT_B2B_ORDERS), async (req, res) => {
+    try {
+      const { paymentStatus, amountReceived } = req.body;
+      
+      const order = await storage.getB2BOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      // Check ownership
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && order.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only update payment status of your own orders" });
+      }
+      
+      const updateData: any = {};
+      
+      if (paymentStatus) {
+        updateData.paymentStatus = paymentStatus;
+      }
+      
+      if (amountReceived !== undefined) {
+        const totalReceived = parseFloat(amountReceived);
+        const totalAmount = parseFloat(order.totalAmount);
+        updateData.amountReceived = String(totalReceived);
+        updateData.balancePending = String(Math.max(0, totalAmount - totalReceived));
+        
+        // Auto-update payment status based on amount
+        if (totalReceived >= totalAmount) {
+          updateData.paymentStatus = "fully_paid";
+        } else if (totalReceived > parseFloat(order.advanceAmount || "0")) {
+          updateData.paymentStatus = "partially_paid";
+        }
+      }
+      
+      const updated = await storage.updateB2BOrder(req.params.id, updateData);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update payment status" });
     }
   });
 

@@ -194,9 +194,19 @@ export default function B2BOrders() {
           <p className="text-muted-foreground">Corporate printing and customization orders</p>
         </div>
 
+        <Link href="/b2b/orders/new">
+          <Button data-testid="button-new-order">
+            <Plus className="h-4 w-4 mr-2" />
+            New Order
+          </Button>
+        </Link>
+      </div>
+
+      {/* Legacy dialog (deprecated - using landing page now) */}
+      {false && (
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button data-testid="button-new-order">
+            <Button data-testid="button-new-order-legacy">
               <Plus className="h-4 w-4 mr-2" />
               New Order
             </Button>
@@ -392,7 +402,7 @@ export default function B2BOrders() {
             </Form>
           </DialogContent>
         </Dialog>
-      </div>
+      )}
 
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1 max-w-md">

@@ -1,0 +1,829 @@
+import { useState } from "react";
+import { useLocation } from "wouter";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useForm, useFieldArray } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { format } from "date-fns";
+import { ArrowLeft, Plus, Trash2, Upload, X, Package, DollarSign, FileText, Eye, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import type { B2BClient, Product, ProductVariant, B2BPrintingType } from "@shared/schema";
+
+const orderItemSchema = z.object({
+  productId: z.string().min(1, "Product is required"),
+  productVariantId: z.string().min(1, "Variant is required"),
+  quantity: z.coerce.number().min(1, "Quantity must be at least 1"),
+});
+
+const formSchema = z.object({
+  clientId: z.string().min(1, "Client is required"),
+  printingTypeId: z.string().optional(),
+  artworkStatus: z.enum(["pending", "received", "approved", "revision_needed"]),
+  priority: z.enum(["normal", "urgent"]),
+  deliveryAddress: z.string().min(1, "Delivery address is required"),
+  deliveryCity: z.string().optional(),
+  deliveryState: z.string().optional(),
+  deliveryZip: z.string().optional(),
+  requiredDeliveryDate: z.string().optional(),
+  specialInstructions: z.string().optional(),
+  totalAmount: z.coerce.number().positive("Total amount must be greater than 0"),
+  advanceAmount: z.coerce.number().positive("Advance amount is required"),
+  advanceMode: z.enum(["cash", "upi", "bank_transfer", "card", "cheque", "online_gateway"]),
+  advanceDate: z.string().min(1, "Advance date is required"),
+  advanceReference: z.string().optional(),
+  items: z.array(orderItemSchema).min(1, "At least one product is required"),
+}).refine(data => data.advanceAmount <= data.totalAmount, {
+  message: "Advance cannot exceed total amount",
+  path: ["advanceAmount"],
+});
+
+type FormData = z.infer<typeof formSchema>;
+
+type ProductWithVariants = Product & { variants: ProductVariant[] };
+
+export default function B2BOrderCreate() {
+  const [, navigate] = useLocation();
+  const { toast } = useToast();
+  const [step, setStep] = useState(1);
+
+  const form = useForm<FormData>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      clientId: "",
+      printingTypeId: "",
+      artworkStatus: "pending",
+      priority: "normal",
+      deliveryAddress: "",
+      deliveryCity: "",
+      deliveryState: "",
+      deliveryZip: "",
+      requiredDeliveryDate: "",
+      specialInstructions: "",
+      totalAmount: 0,
+      advanceAmount: 0,
+      advanceMode: "upi",
+      advanceDate: format(new Date(), "yyyy-MM-dd"),
+      advanceReference: "",
+      items: [{ productId: "", productVariantId: "", quantity: 1 }],
+    },
+  });
+
+  const { fields, append, remove } = useFieldArray({
+    control: form.control,
+    name: "items",
+  });
+
+  const { data: clients = [] } = useQuery<B2BClient[]>({
+    queryKey: ["/api/b2b/clients"],
+  });
+
+  const { data: products = [] } = useQuery<ProductWithVariants[]>({
+    queryKey: ["/api/products"],
+  });
+
+  const { data: printingTypes = [] } = useQuery<B2BPrintingType[]>({
+    queryKey: ["/api/b2b/printing-types"],
+  });
+
+  const createOrderMutation = useMutation({
+    mutationFn: async (data: FormData) => {
+      const response = await apiRequest("POST", "/api/b2b/orders", data);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/b2b/orders"] });
+      toast({ title: "Order created successfully" });
+      navigate("/b2b/orders");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to create order",
+        description: error.message || "Please check the form and try again",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const selectedClient = clients.find(c => c.id === form.watch("clientId"));
+  const totalAmount = form.watch("totalAmount");
+  const advanceAmount = form.watch("advanceAmount");
+  const balanceDue = totalAmount - advanceAmount;
+
+  const getVariantsForProduct = (productId: string): ProductVariant[] => {
+    const product = products.find(p => p.id === productId);
+    return product?.variants || [];
+  };
+
+  const onSubmit = (data: FormData) => {
+    createOrderMutation.mutate(data);
+  };
+
+  const canProceedToStep2 = form.watch("clientId") && (form.watch("items")?.length || 0) > 0;
+  const canProceedToStep3 = canProceedToStep2 && form.watch("totalAmount") > 0 && form.watch("advanceAmount") > 0;
+  const canProceedToStep4 = canProceedToStep3 && form.watch("deliveryAddress");
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="border-b bg-card">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => navigate("/b2b/orders")} data-testid="button-back">
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <div>
+              <h1 className="text-2xl font-bold">Create B2B Order</h1>
+              <p className="text-sm text-muted-foreground">Fill in the details to create a new corporate order</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="container mx-auto px-4 py-6">
+        <div className="flex gap-2 mb-6">
+          {[1, 2, 3, 4].map((s) => (
+            <div
+              key={s}
+              className={`flex-1 h-2 rounded-full ${
+                step >= s ? "bg-primary" : "bg-muted"
+              }`}
+            />
+          ))}
+        </div>
+
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)}>
+            {step === 1 && (
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Package className="h-5 w-5" />
+                      Order Details
+                    </CardTitle>
+                    <CardDescription>Select client and add products to the order</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="clientId"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Client *</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-client">
+                                  <SelectValue placeholder="Select a client" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {clients.map((client) => (
+                                  <SelectItem key={client.id} value={client.id}>
+                                    {client.companyName}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="printingTypeId"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Printing Type</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-printing-type">
+                                  <SelectValue placeholder="Select printing type" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {printingTypes.filter(pt => pt.isActive).map((pt) => (
+                                  <SelectItem key={pt.id} value={pt.id}>
+                                    {pt.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="artworkStatus"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Artwork Status</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-artwork-status">
+                                  <SelectValue />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="pending">Pending</SelectItem>
+                                <SelectItem value="received">Received</SelectItem>
+                                <SelectItem value="approved">Approved</SelectItem>
+                                <SelectItem value="revision_needed">Revision Needed</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="priority"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Priority</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-priority">
+                                  <SelectValue />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="normal">Normal</SelectItem>
+                                <SelectItem value="urgent">Urgent</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <Separator />
+
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <Label className="text-base font-semibold">Products & Variants</Label>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => append({ productId: "", productVariantId: "", quantity: 1 })}
+                          data-testid="button-add-product"
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          Add Product
+                        </Button>
+                      </div>
+
+                      <div className="space-y-4">
+                        {fields.map((field, index) => {
+                          const productId = form.watch(`items.${index}.productId`);
+                          const variants = getVariantsForProduct(productId);
+
+                          return (
+                            <div key={field.id} className="flex items-start gap-3 p-4 border rounded-lg bg-muted/30">
+                              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <FormField
+                                  control={form.control}
+                                  name={`items.${index}.productId`}
+                                  render={({ field: f }) => (
+                                    <FormItem>
+                                      <FormLabel>Product</FormLabel>
+                                      <Select
+                                        onValueChange={(value) => {
+                                          f.onChange(value);
+                                          form.setValue(`items.${index}.productVariantId`, "");
+                                        }}
+                                        value={f.value}
+                                      >
+                                        <FormControl>
+                                          <SelectTrigger data-testid={`select-product-${index}`}>
+                                            <SelectValue placeholder="Select product" />
+                                          </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                          {products.map((product) => (
+                                            <SelectItem key={product.id} value={product.id}>
+                                              {product.name}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name={`items.${index}.productVariantId`}
+                                  render={({ field: f }) => (
+                                    <FormItem>
+                                      <FormLabel>Variant (Color/Size)</FormLabel>
+                                      <Select onValueChange={f.onChange} value={f.value} disabled={!productId}>
+                                        <FormControl>
+                                          <SelectTrigger data-testid={`select-variant-${index}`}>
+                                            <SelectValue placeholder="Select variant" />
+                                          </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                          {variants.map((v) => (
+                                            <SelectItem key={v.id} value={v.id}>
+                                              {v.color && v.size
+                                                ? `${v.color} - ${v.size}`
+                                                : v.color || v.size || v.sku}
+                                              {" "}({v.stockQuantity} in stock)
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name={`items.${index}.quantity`}
+                                  render={({ field: f }) => (
+                                    <FormItem>
+                                      <FormLabel>Quantity</FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type="number"
+                                          min={1}
+                                          {...f}
+                                          data-testid={`input-quantity-${index}`}
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
+
+                              {fields.length > 1 && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="mt-8"
+                                  onClick={() => remove(index)}
+                                  data-testid={`button-remove-product-${index}`}
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    onClick={() => setStep(2)}
+                    disabled={!canProceedToStep2}
+                    data-testid="button-next-step-1"
+                  >
+                    Next: Finance Details
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {step === 2 && (
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <DollarSign className="h-5 w-5" />
+                      Finance Details
+                    </CardTitle>
+                    <CardDescription>Enter total amount and advance payment details</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="totalAmount"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Total Amount (INR) *</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                placeholder="Enter total order amount"
+                                {...field}
+                                data-testid="input-total-amount"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="advanceAmount"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Advance Amount (INR) *</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                placeholder="Enter advance received"
+                                {...field}
+                                data-testid="input-advance-amount"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="advanceMode"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Payment Mode *</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-advance-mode">
+                                  <SelectValue placeholder="How was advance received?" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="upi">UPI</SelectItem>
+                                <SelectItem value="cash">Cash</SelectItem>
+                                <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                                <SelectItem value="card">Card</SelectItem>
+                                <SelectItem value="cheque">Cheque</SelectItem>
+                                <SelectItem value="online_gateway">Online Gateway</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="advanceDate"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Advance Date *</FormLabel>
+                            <FormControl>
+                              <Input type="date" {...field} data-testid="input-advance-date" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="advanceReference"
+                        render={({ field }) => (
+                          <FormItem className="md:col-span-2">
+                            <FormLabel>Transaction Reference (Optional)</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="Transaction ID / Cheque number / Reference"
+                                {...field}
+                                data-testid="input-advance-reference"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    {totalAmount > 0 && (
+                      <div className="p-4 bg-muted rounded-lg">
+                        <div className="flex justify-between items-center">
+                          <span className="text-muted-foreground">Total Amount:</span>
+                          <span className="font-medium">₹{totalAmount.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between items-center mt-2">
+                          <span className="text-muted-foreground">Advance Received:</span>
+                          <span className="font-medium text-green-600">₹{advanceAmount.toLocaleString()}</span>
+                        </div>
+                        <Separator className="my-2" />
+                        <div className="flex justify-between items-center">
+                          <span className="font-semibold">Balance Due:</span>
+                          <span className="font-bold text-lg">₹{balanceDue.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <div className="flex justify-between">
+                  <Button type="button" variant="outline" onClick={() => setStep(1)} data-testid="button-prev-step-2">
+                    Back
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => setStep(3)}
+                    disabled={!canProceedToStep3}
+                    data-testid="button-next-step-2"
+                  >
+                    Next: Delivery Details
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {step === 3 && (
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <FileText className="h-5 w-5" />
+                      Delivery Details
+                    </CardTitle>
+                    <CardDescription>Enter delivery address and special instructions</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <FormField
+                      control={form.control}
+                      name="deliveryAddress"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Delivery Address *</FormLabel>
+                          <FormControl>
+                            <Textarea
+                              placeholder="Full delivery address"
+                              className="min-h-[100px]"
+                              {...field}
+                              data-testid="textarea-delivery-address"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="deliveryCity"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>City</FormLabel>
+                            <FormControl>
+                              <Input placeholder="City" {...field} data-testid="input-delivery-city" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="deliveryState"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>State</FormLabel>
+                            <FormControl>
+                              <Input placeholder="State" {...field} data-testid="input-delivery-state" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="deliveryZip"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>PIN Code</FormLabel>
+                            <FormControl>
+                              <Input placeholder="PIN Code" {...field} data-testid="input-delivery-zip" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <FormField
+                      control={form.control}
+                      name="requiredDeliveryDate"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Required Delivery Date</FormLabel>
+                          <FormControl>
+                            <Input type="date" {...field} data-testid="input-required-delivery-date" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="specialInstructions"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Special Instructions</FormLabel>
+                          <FormControl>
+                            <Textarea
+                              placeholder="Any special requirements or notes"
+                              className="min-h-[80px]"
+                              {...field}
+                              data-testid="textarea-special-instructions"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </CardContent>
+                </Card>
+
+                <div className="flex justify-between">
+                  <Button type="button" variant="outline" onClick={() => setStep(2)} data-testid="button-prev-step-3">
+                    Back
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => setStep(4)}
+                    disabled={!canProceedToStep4}
+                    data-testid="button-next-step-3"
+                  >
+                    Next: Review Order
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {step === 4 && (
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Eye className="h-5 w-5" />
+                      Order Summary
+                    </CardTitle>
+                    <CardDescription>Review your order before creating</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-4">
+                        <h3 className="font-semibold text-sm text-muted-foreground uppercase">Client</h3>
+                        <div className="p-3 bg-muted rounded-lg">
+                          <p className="font-medium">{selectedClient?.companyName || "N/A"}</p>
+                          <p className="text-sm text-muted-foreground">{selectedClient?.contactPerson}</p>
+                        </div>
+
+                        <h3 className="font-semibold text-sm text-muted-foreground uppercase mt-4">Order Details</h3>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Priority:</span>
+                            <Badge variant={form.watch("priority") === "urgent" ? "destructive" : "secondary"}>
+                              {form.watch("priority")}
+                            </Badge>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Artwork Status:</span>
+                            <span>{form.watch("artworkStatus").replace("_", " ")}</span>
+                          </div>
+                          {form.watch("printingTypeId") && (
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Printing Type:</span>
+                              <span>{printingTypes.find(pt => pt.id === form.watch("printingTypeId"))?.name}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <h3 className="font-semibold text-sm text-muted-foreground uppercase">Delivery Address</h3>
+                        <div className="p-3 bg-muted rounded-lg text-sm">
+                          <p>{form.watch("deliveryAddress")}</p>
+                          {(form.watch("deliveryCity") || form.watch("deliveryState") || form.watch("deliveryZip")) && (
+                            <p className="mt-1">
+                              {[form.watch("deliveryCity"), form.watch("deliveryState"), form.watch("deliveryZip")]
+                                .filter(Boolean)
+                                .join(", ")}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    <div>
+                      <h3 className="font-semibold text-sm text-muted-foreground uppercase mb-3">Products</h3>
+                      <div className="space-y-2">
+                        {form.watch("items").map((item, index) => {
+                          const product = products.find(p => p.id === item.productId);
+                          const variant = product?.variants.find(v => v.id === item.productVariantId);
+                          return (
+                            <div key={index} className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                              <div>
+                                <p className="font-medium">{product?.name || "Unknown Product"}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  {variant ? `${variant.color || ""} ${variant.size || ""} (${variant.sku})` : "N/A"}
+                                </p>
+                              </div>
+                              <Badge variant="secondary">Qty: {item.quantity}</Badge>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <h3 className="font-semibold text-sm text-muted-foreground uppercase mb-3">Payment Details</h3>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Total Amount:</span>
+                            <span className="font-medium">₹{totalAmount.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Advance Received:</span>
+                            <span className="font-medium text-green-600">₹{advanceAmount.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Payment Mode:</span>
+                            <span>{form.watch("advanceMode").replace("_", " ").toUpperCase()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Advance Date:</span>
+                            <span>{form.watch("advanceDate")}</span>
+                          </div>
+                          <Separator className="my-2" />
+                          <div className="flex justify-between text-base">
+                            <span className="font-semibold">Balance Due:</span>
+                            <span className="font-bold">₹{balanceDue.toLocaleString()}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {form.watch("specialInstructions") && (
+                        <div>
+                          <h3 className="font-semibold text-sm text-muted-foreground uppercase mb-3">Special Instructions</h3>
+                          <p className="text-sm p-3 bg-muted rounded-lg">{form.watch("specialInstructions")}</p>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <div className="flex justify-between">
+                  <Button type="button" variant="outline" onClick={() => setStep(3)} data-testid="button-prev-step-4">
+                    Back
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={createOrderMutation.isPending}
+                    data-testid="button-create-order"
+                  >
+                    {createOrderMutation.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Creating Order...
+                      </>
+                    ) : (
+                      "Create Order"
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </form>
+        </Form>
+      </div>
+    </div>
+  );
+}
