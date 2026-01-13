@@ -379,6 +379,7 @@ export const b2bOrders = pgTable("b2b_orders", {
   advanceMode: b2bPaymentModeEnum("advance_mode"),
   advanceDate: timestamp("advance_date"),
   advanceReference: text("advance_reference"),
+  advanceProofUrl: text("advance_proof_url"),
   paymentStatus: b2bPaymentStatusEnum("payment_status").default("advance_received").notNull(),
   amountReceived: decimal("amount_received", { precision: 10, scale: 2 }).default("0").notNull(),
   balancePending: decimal("balance_pending", { precision: 10, scale: 2 }).default("0").notNull(),
@@ -811,7 +812,8 @@ export const createB2BOrderPayloadSchema = z.object({
     required_error: "Advance payment mode is required"
   }),
   advanceDate: z.string().min(1, "Advance date is required"),
-  advanceReference: z.string().optional(),
+  advanceReference: z.string().min(1, "Transaction reference is required"),
+  advanceProofUrl: z.string().optional(),
   // Items array
   items: z.array(b2bOrderItemInputSchema).min(1, "At least one product item is required"),
 }).refine(data => data.advanceAmount <= data.totalAmount, {

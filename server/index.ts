@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
+import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 
@@ -64,6 +65,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  registerObjectStorageRoutes(app);
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

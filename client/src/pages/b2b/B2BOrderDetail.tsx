@@ -387,32 +387,24 @@ export default function B2BOrderDetail() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            {order.fabricType && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Fabric Type:</span>
-                <span>{order.fabricType}</span>
-              </div>
-            )}
-            {order.printingType && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Printing Type:</span>
-                <span>{order.printingType}</span>
-              </div>
-            )}
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Priority:</span>
+              <Badge variant={order.priority === "urgent" ? "destructive" : "outline"}>{order.priority}</Badge>
+            </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Artwork Status:</span>
               <Badge variant="outline">{order.artworkStatus}</Badge>
             </div>
-            {order.sizeBreakup && (
-              <div>
-                <span className="text-muted-foreground">Size Breakup:</span>
-                <p className="mt-1">{order.sizeBreakup}</p>
+            {order.requiredDeliveryDate && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Required Delivery:</span>
+                <span>{format(new Date(order.requiredDeliveryDate), "MMM d, yyyy")}</span>
               </div>
             )}
-            {order.expectedDeliveryDate && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Expected Delivery:</span>
-                <span>{format(new Date(order.expectedDeliveryDate), "MMM d, yyyy")}</span>
+            {order.specialInstructions && (
+              <div>
+                <span className="text-muted-foreground">Special Instructions:</span>
+                <p className="mt-1">{order.specialInstructions}</p>
               </div>
             )}
           </CardContent>
@@ -484,7 +476,7 @@ export default function B2BOrderDetail() {
                     <div>
                       <p className="font-medium">{formatCurrency(payment.amount)}</p>
                       <p className="text-xs text-muted-foreground">
-                        {payment.paymentMethod} • {payment.referenceNumber || "No ref"}
+                        {payment.paymentMode} • {payment.transactionRef || "No ref"}
                       </p>
                     </div>
                     <span className="text-sm text-muted-foreground">
@@ -516,7 +508,7 @@ export default function B2BOrderDetail() {
                         <p className="text-sm text-muted-foreground mt-1">{entry.comment}</p>
                       )}
                       <p className="text-xs text-muted-foreground mt-1">
-                        {format(new Date(entry.changedAt), "MMM d, yyyy 'at' h:mm a")}
+                        {entry.createdAt ? format(new Date(entry.createdAt), "MMM d, yyyy 'at' h:mm a") : "Unknown date"}
                       </p>
                     </div>
                   </div>

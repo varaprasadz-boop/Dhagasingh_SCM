@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm, useFieldArray } from "react-hook-form";
@@ -6,8 +6,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useUpload } from "@/hooks/use-upload";
 import { format } from "date-fns";
-import { ArrowLeft, Plus, Trash2, Upload, X, Package, DollarSign, FileText, Eye, Loader2 } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Upload, X, Package, DollarSign, FileText, Eye, Loader2, ImageIcon, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -40,7 +41,7 @@ const formSchema = z.object({
   advanceAmount: z.coerce.number().positive("Advance amount is required"),
   advanceMode: z.enum(["cash", "upi", "bank_transfer", "card", "cheque", "online_gateway"]),
   advanceDate: z.string().min(1, "Advance date is required"),
-  advanceReference: z.string().optional(),
+  advanceReference: z.string().min(1, "Transaction reference is required"),
   items: z.array(orderItemSchema).min(1, "At least one product is required"),
 }).refine(data => data.advanceAmount <= data.totalAmount, {
   message: "Advance cannot exceed total amount",
@@ -55,6 +56,23 @@ export default function B2BOrderCreate() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [step, setStep] = useState(1);
+  const [advanceProofUrl, setAdvanceProofUrl] = useState<string | null>(null);
+  const [advanceProofName, setAdvanceProofName] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const { uploadFile, isUploading, progress } = useUpload({
+    onSuccess: (response) => {
+      setAdvanceProofUrl(response.objectPath);
+      toast({ title: "Payment proof uploaded successfully" });
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to upload payment proof",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -97,7 +115,10 @@ export default function B2BOrderCreate() {
 
   const createOrderMutation = useMutation({
     mutationFn: async (data: FormData) => {
-      const response = await apiRequest("POST", "/api/b2b/orders", data);
+      const response = await apiRequest("POST", "/api/b2b/orders", {
+        ...data,
+        advanceProofUrl: advanceProofUrl,
+      });
       return response.json();
     },
     onSuccess: () => {
@@ -126,6 +147,21 @@ export default function B2BOrderCreate() {
 
   const onSubmit = (data: FormData) => {
     createOrderMutation.mutate(data);
+  };
+
+  const handleFormSubmit = () => {
+    const errors = form.formState.errors;
+    if (Object.keys(errors).length > 0) {
+      console.error("Form validation errors:", errors);
+      const errorMessages = Object.entries(errors).map(([field, error]) => 
+        `${field}: ${(error as any)?.message || 'Invalid'}`
+      ).join(", ");
+      toast({
+        title: "Please fix the following errors",
+        description: errorMessages,
+        variant: "destructive",
+      });
+    }
   };
 
   const canProceedToStep2 = form.watch("clientId") && (form.watch("items")?.length || 0) > 0;
@@ -507,7 +543,7 @@ export default function B2BOrderCreate() {
                         name="advanceReference"
                         render={({ field }) => (
                           <FormItem className="md:col-span-2">
-                            <FormLabel>Transaction Reference (Optional)</FormLabel>
+                            <FormLabel>Transaction Reference *</FormLabel>
                             <FormControl>
                               <Input
                                 placeholder="Transaction ID / Cheque number / Reference"
@@ -519,6 +555,70 @@ export default function B2BOrderCreate() {
                           </FormItem>
                         )}
                       />
+
+                      <div className="md:col-span-2">
+                        <Label>Payment Proof (Optional)</Label>
+                        <p className="text-sm text-muted-foreground mb-2">
+                          Upload screenshot or image of payment confirmation
+                        </p>
+                        <input
+                          type="file"
+                          ref={fileInputRef}
+                          accept="image/*"
+                          className="hidden"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              setAdvanceProofName(file.name);
+                              await uploadFile(file);
+                            }
+                          }}
+                          data-testid="input-proof-file"
+                        />
+                        
+                        {!advanceProofUrl ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={isUploading}
+                            className="w-full h-20 border-dashed gap-2"
+                            data-testid="button-upload-proof"
+                          >
+                            {isUploading ? (
+                              <>
+                                <Loader2 className="h-5 w-5 animate-spin" />
+                                <span>Uploading... {progress}%</span>
+                              </>
+                            ) : (
+                              <>
+                                <ImageIcon className="h-5 w-5" />
+                                <span>Click to upload payment proof</span>
+                              </>
+                            )}
+                          </Button>
+                        ) : (
+                          <div className="flex items-center gap-2 p-3 border rounded-md bg-green-50 dark:bg-green-900/20">
+                            <CheckCircle className="h-5 w-5 text-green-600" />
+                            <span className="flex-1 text-sm truncate">{advanceProofName || "Payment proof uploaded"}</span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setAdvanceProofUrl(null);
+                                setAdvanceProofName(null);
+                                if (fileInputRef.current) {
+                                  fileInputRef.current.value = "";
+                                }
+                              }}
+                              data-testid="button-remove-proof"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {totalAmount > 0 && (
@@ -807,6 +907,7 @@ export default function B2BOrderCreate() {
                   <Button
                     type="submit"
                     disabled={createOrderMutation.isPending}
+                    onClick={handleFormSubmit}
                     data-testid="button-create-order"
                   >
                     {createOrderMutation.isPending ? (
