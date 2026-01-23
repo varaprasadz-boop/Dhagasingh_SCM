@@ -40,6 +40,7 @@ import B2BOrderDetail from "@/pages/b2b/B2BOrderDetail";
 import B2BOrderCreate from "@/pages/b2b/B2BOrderCreate";
 import B2BInvoices from "@/pages/b2b/B2BInvoices";
 import B2BPayments from "@/pages/b2b/B2BPayments";
+import B2BPrintingTypes from "@/pages/b2b/B2BPrintingTypes";
 import ReceiveStock from "@/pages/ReceiveStock";
 
 function DesktopRouter() {
@@ -66,6 +67,7 @@ function DesktopRouter() {
       <Route path="/b2b/orders/:id" component={B2BOrderDetail} />
       <Route path="/b2b/invoices" component={B2BInvoices} />
       <Route path="/b2b/payments" component={B2BPayments} />
+      <Route path="/b2b/printing-types" component={B2BPrintingTypes} />
       <Route component={NotFound} />
     </Switch>
   );

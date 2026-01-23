@@ -45,10 +45,27 @@ export function registerObjectStorageRoutes(app: Express): void {
         });
       }
 
+      // Log environment info for debugging
+      const privateDir = process.env.PRIVATE_OBJECT_DIR;
+      const bucketId = process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID;
+      console.log("[Object Storage] Request upload URL for:", name);
+      console.log("[Object Storage] PRIVATE_OBJECT_DIR set:", !!privateDir);
+      console.log("[Object Storage] DEFAULT_OBJECT_STORAGE_BUCKET_ID set:", !!bucketId);
+
+      if (!privateDir) {
+        console.error("[Object Storage] PRIVATE_OBJECT_DIR not configured");
+        return res.status(503).json({
+          error: "Object storage not configured",
+          details: "PRIVATE_OBJECT_DIR environment variable is not set. Please configure object storage in the Replit tools panel.",
+        });
+      }
+
       const uploadURL = await objectStorageService.getObjectEntityUploadURL();
 
       // Extract object path from the presigned URL for later reference
       const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
+
+      console.log("[Object Storage] Upload URL generated successfully for:", name);
 
       res.json({
         uploadURL,
@@ -56,9 +73,25 @@ export function registerObjectStorageRoutes(app: Express): void {
         // Echo back the metadata for client convenience
         metadata: { name, size, contentType },
       });
-    } catch (error) {
-      console.error("Error generating upload URL:", error);
-      res.status(500).json({ error: "Failed to generate upload URL" });
+    } catch (error: any) {
+      console.error("[Object Storage] Error generating upload URL:", error);
+      console.error("[Object Storage] Error name:", error?.name);
+      console.error("[Object Storage] Error message:", error?.message);
+      console.error("[Object Storage] Error stack:", error?.stack);
+      
+      // Provide more helpful error message based on the error type
+      let errorMessage = "Failed to generate upload URL";
+      let details = error?.message || "Unknown error";
+      
+      if (error?.message?.includes("PRIVATE_OBJECT_DIR")) {
+        errorMessage = "Object storage not configured";
+        details = "Please configure object storage in the Replit tools panel.";
+      } else if (error?.code === "ECONNREFUSED" || error?.message?.includes("127.0.0.1:1106")) {
+        errorMessage = "Object storage service unavailable";
+        details = "The storage sidecar service is not running. This may happen in deployed environments.";
+      }
+      
+      res.status(500).json({ error: errorMessage, details });
     }
   });
 
