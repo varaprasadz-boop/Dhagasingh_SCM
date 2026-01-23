@@ -1,3 +1,6 @@
+// Load environment variables from .env file first
+import "dotenv/config";
+
 import express, { type Request, Response, NextFunction } from "express";
 import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
