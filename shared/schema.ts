@@ -813,7 +813,7 @@ export const createB2BOrderPayloadSchema = z.object({
   }),
   advanceDate: z.string().min(1, "Advance date is required"),
   advanceReference: z.string().min(1, "Transaction reference is required"),
-  advanceProofUrl: z.string().optional(),
+  advanceProofUrl: z.string().min(1, "Payment proof is required"),
   // Items array
   items: z.array(b2bOrderItemInputSchema).min(1, "At least one product item is required"),
 }).refine(data => data.advanceAmount <= data.totalAmount, {

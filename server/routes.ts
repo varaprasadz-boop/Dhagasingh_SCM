@@ -2121,6 +2121,27 @@ export async function registerRoutes(
       
       const { items, totalAmount, advanceAmount, advanceMode, advanceDate, advanceReference, requiredDeliveryDate, ...orderData } = parseResult.data;
       
+      // Validate stock quantities before creating order
+      const stockErrors: string[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.productVariantId) {
+          const variant = await storage.getProductVariantById(item.productVariantId);
+          if (!variant) {
+            stockErrors.push(`Item ${i + 1}: Invalid variant ID`);
+          } else if (item.quantity > variant.stockQuantity) {
+            stockErrors.push(`Item ${i + 1}: Requested quantity (${item.quantity}) exceeds available stock (${variant.stockQuantity})`);
+          }
+        }
+      }
+      
+      if (stockErrors.length > 0) {
+        return res.status(400).json({
+          error: "Insufficient stock",
+          details: stockErrors.map(msg => ({ field: "items", message: msg }))
+        });
+      }
+      
       // Calculate balance
       const balancePending = totalAmount - advanceAmount;
       

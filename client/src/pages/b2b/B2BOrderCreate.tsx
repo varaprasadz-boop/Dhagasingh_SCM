@@ -45,6 +45,7 @@ const formSchema = z.object({
   advanceMode: z.enum(["cash", "upi", "bank_transfer", "card", "cheque", "online_gateway"]),
   advanceDate: z.string().min(1, "Advance date is required"),
   advanceReference: z.string().min(1, "Transaction reference is required"),
+  advanceProofUrl: z.string().min(1, "Payment proof is required"),
   items: z.array(orderItemSchema).min(1, "At least one product is required"),
 }).refine(data => data.advanceAmount <= data.totalAmount, {
   message: "Advance cannot exceed total amount",
@@ -59,23 +60,8 @@ export default function B2BOrderCreate() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [step, setStep] = useState(1);
-  const [advanceProofUrl, setAdvanceProofUrl] = useState<string | null>(null);
   const [advanceProofName, setAdvanceProofName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  const { uploadFile, isUploading, progress } = useUpload({
-    onSuccess: (response) => {
-      setAdvanceProofUrl(response.objectPath);
-      toast({ title: "Payment proof uploaded successfully" });
-    },
-    onError: (error) => {
-      toast({
-        title: "Failed to upload payment proof",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -95,6 +81,7 @@ export default function B2BOrderCreate() {
       advanceMode: "upi",
       advanceDate: format(new Date(), "yyyy-MM-dd"),
       advanceReference: "",
+      advanceProofUrl: "",
       items: [{ productId: "", productVariantId: "", quantity: 1 }],
     },
   });
@@ -103,6 +90,22 @@ export default function B2BOrderCreate() {
     control: form.control,
     name: "items",
   });
+
+  const { uploadFile, isUploading, progress } = useUpload({
+    onSuccess: (response) => {
+      form.setValue("advanceProofUrl", response.objectPath);
+      toast({ title: "Payment proof uploaded successfully" });
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to upload payment proof",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const advanceProofUrl = form.watch("advanceProofUrl");
 
   const { data: clients = [] } = useQuery<B2BClient[]>({
     queryKey: ["/api/b2b/clients"],
@@ -118,10 +121,7 @@ export default function B2BOrderCreate() {
 
   const createOrderMutation = useMutation({
     mutationFn: async (data: FormData) => {
-      const response = await apiRequest("POST", "/api/b2b/orders", {
-        ...data,
-        advanceProofUrl: advanceProofUrl,
-      });
+      const response = await apiRequest("POST", "/api/b2b/orders", data);
       return response.json();
     },
     onSuccess: () => {
@@ -148,7 +148,42 @@ export default function B2BOrderCreate() {
     return product?.variants || [];
   };
 
+  const getVariantById = (variantId: string): ProductVariant | undefined => {
+    for (const product of products) {
+      const variant = product.variants?.find(v => v.id === variantId);
+      if (variant) return variant;
+    }
+    return undefined;
+  };
+
+  const validateStockQuantities = (): { valid: boolean; errors: string[] } => {
+    const items = form.watch("items") || [];
+    const errors: string[] = [];
+    
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.productVariantId && item.quantity) {
+        const variant = getVariantById(item.productVariantId);
+        if (variant && item.quantity > variant.stockQuantity) {
+          errors.push(`Item ${i + 1}: Quantity (${item.quantity}) exceeds available stock (${variant.stockQuantity})`);
+        }
+      }
+    }
+    
+    return { valid: errors.length === 0, errors };
+  };
+
+  const stockValidation = validateStockQuantities();
+
   const onSubmit = (data: FormData) => {
+    if (!stockValidation.valid) {
+      toast({
+        title: "Stock quantity exceeded",
+        description: stockValidation.errors.join(". "),
+        variant: "destructive",
+      });
+      return;
+    }
     createOrderMutation.mutate(data);
   };
 
@@ -167,8 +202,9 @@ export default function B2BOrderCreate() {
     }
   };
 
-  const canProceedToStep2 = form.watch("clientId") && (form.watch("items")?.length || 0) > 0;
-  const canProceedToStep3 = canProceedToStep2 && form.watch("totalAmount") > 0 && form.watch("advanceAmount") > 0;
+  const advanceReference = form.watch("advanceReference");
+  const canProceedToStep2 = form.watch("clientId") && (form.watch("items")?.length || 0) > 0 && stockValidation.valid;
+  const canProceedToStep3 = canProceedToStep2 && form.watch("totalAmount") > 0 && form.watch("advanceAmount") > 0 && advanceReference && advanceProofUrl;
   const canProceedToStep4 = canProceedToStep3 && form.watch("deliveryAddress");
 
   return (
@@ -416,11 +452,18 @@ export default function B2BOrderCreate() {
                                         </FormControl>
                                         <SelectContent>
                                           {variants.map((v) => (
-                                            <SelectItem key={v.id} value={v.id}>
+                                            <SelectItem 
+                                              key={v.id} 
+                                              value={v.id}
+                                              disabled={v.stockQuantity === 0}
+                                              className={v.stockQuantity === 0 ? "text-muted-foreground opacity-50" : ""}
+                                            >
                                               {v.color && v.size
                                                 ? `${v.color} - ${v.size}`
                                                 : v.color || v.size || v.sku}
-                                              {" "}({v.stockQuantity} in stock)
+                                              {v.stockQuantity === 0 
+                                                ? " (Out of stock)" 
+                                                : ` (${v.stockQuantity} in stock)`}
                                             </SelectItem>
                                           ))}
                                         </SelectContent>
@@ -433,20 +476,38 @@ export default function B2BOrderCreate() {
                                 <FormField
                                   control={form.control}
                                   name={`items.${index}.quantity`}
-                                  render={({ field: f }) => (
-                                    <FormItem>
-                                      <FormLabel>Quantity</FormLabel>
-                                      <FormControl>
-                                        <Input
-                                          type="number"
-                                          min={1}
-                                          {...f}
-                                          data-testid={`input-quantity-${index}`}
-                                        />
-                                      </FormControl>
-                                      <FormMessage />
-                                    </FormItem>
-                                  )}
+                                  render={({ field: f }) => {
+                                    const selectedVariantId = form.watch(`items.${index}.productVariantId`);
+                                    const selectedVariant = selectedVariantId ? getVariantById(selectedVariantId) : undefined;
+                                    const exceeds = selectedVariant && f.value > selectedVariant.stockQuantity;
+                                    
+                                    return (
+                                      <FormItem>
+                                        <FormLabel className="flex items-center gap-1">
+                                          Quantity
+                                          {exceeds && (
+                                            <span className="text-xs text-red-500 font-normal">(Exceeds stock!)</span>
+                                          )}
+                                        </FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            type="number"
+                                            min={1}
+                                            max={selectedVariant?.stockQuantity}
+                                            {...f}
+                                            className={exceeds ? "border-red-500 focus:border-red-500" : ""}
+                                            data-testid={`input-quantity-${index}`}
+                                          />
+                                        </FormControl>
+                                        {selectedVariant && (
+                                          <p className={`text-xs ${exceeds ? "text-red-500" : "text-muted-foreground"}`}>
+                                            Max available: {selectedVariant.stockQuantity}
+                                          </p>
+                                        )}
+                                        <FormMessage />
+                                      </FormItem>
+                                    );
+                                  }}
                                 />
                               </div>
 
@@ -582,11 +643,17 @@ export default function B2BOrderCreate() {
                         name="advanceReference"
                         render={({ field }) => (
                           <FormItem className="md:col-span-2">
-                            <FormLabel>Transaction Reference *</FormLabel>
+                            <FormLabel className="flex items-center gap-1">
+                              Transaction Reference *
+                              {!field.value && (
+                                <span className="text-xs text-orange-500 font-normal">(Required to proceed)</span>
+                              )}
+                            </FormLabel>
                             <FormControl>
                               <Input
                                 placeholder="Transaction ID / Cheque number / Reference"
                                 {...field}
+                                className={!field.value ? "border-orange-400 focus:border-orange-500" : ""}
                                 data-testid="input-advance-reference"
                               />
                             </FormControl>
@@ -596,7 +663,12 @@ export default function B2BOrderCreate() {
                       />
 
                       <div className="md:col-span-2">
-                        <Label>Payment Proof (Optional)</Label>
+                        <Label className="flex items-center gap-1">
+                          Payment Proof *
+                          {!advanceProofUrl && (
+                            <span className="text-xs text-orange-500 font-normal">(Required to proceed)</span>
+                          )}
+                        </Label>
                         <p className="text-sm text-muted-foreground mb-2">
                           Upload screenshot or image of payment confirmation
                         </p>
@@ -621,7 +693,7 @@ export default function B2BOrderCreate() {
                             variant="outline"
                             onClick={() => fileInputRef.current?.click()}
                             disabled={isUploading}
-                            className="w-full h-20 border-dashed gap-2"
+                            className={`w-full h-20 border-dashed gap-2 ${!advanceProofUrl ? "border-orange-400 hover:border-orange-500" : ""}`}
                             data-testid="button-upload-proof"
                           >
                             {isUploading ? (
@@ -645,7 +717,7 @@ export default function B2BOrderCreate() {
                               variant="ghost"
                               size="icon"
                               onClick={() => {
-                                setAdvanceProofUrl(null);
+                                form.setValue("advanceProofUrl", "");
                                 setAdvanceProofName(null);
                                 if (fileInputRef.current) {
                                   fileInputRef.current.value = "";
