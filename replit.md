@@ -83,6 +83,31 @@ The B2B order creation uses a dedicated landing page (`/b2b/orders/new`) with a 
 - **Permission structure**: B2B uses VIEW_ALL_B2B_DATA permission to allow managers to see all data; regular B2B employees only see their own clients/orders
 - **Artwork limit**: Maximum 10 files per order (enforced at API level)
 
+### File Storage Configuration (Production Deployment)
+The system supports two storage modes for file uploads (payment proofs, artwork):
+
+**Auto-Detection**: The system automatically detects the environment:
+- **Replit**: Uses Object Storage (presigned URLs) when running on Replit
+- **Local/VPS**: Uses local file system storage when deployed to Hostinger VPS or similar
+
+**Environment Variables**:
+- `FILE_STORAGE_MODE`: Force storage mode (`local`, `replit`, or `auto` - default)
+- `UPLOADS_DIR`: Custom uploads directory path (default: `./uploads`)
+- `BASE_URL`: Base URL for the application (used in local mode)
+
+**Local Storage Structure**:
+```
+uploads/
+├── payment-proofs/   # B2B payment proof images
+├── artwork/          # B2B order artwork files
+└── misc/             # Other uploads
+```
+
+**Hostinger VPS Setup**:
+1. Set `FILE_STORAGE_MODE=local` in environment
+2. Ensure `uploads/` directory is writable
+3. Configure nginx to serve static files from `/uploads/` path
+
 ## System Architecture
 
 ### Frontend Architecture
