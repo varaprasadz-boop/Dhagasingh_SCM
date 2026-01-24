@@ -52,9 +52,21 @@ export function registerObjectStorageRoutes(app: Express): void {
 
       if (currentMode === "local") {
         const result = await fileStorageService.getUploadUrl(category);
+        
+        // Add extension based on contentType for consistent objectPath
+        const mimeToExt: Record<string, string> = {
+          "image/jpeg": ".jpg",
+          "image/png": ".png",
+          "image/gif": ".gif",
+          "image/webp": ".webp",
+          "application/pdf": ".pdf",
+        };
+        const ext = mimeToExt[contentType] || path.extname(name) || ".bin";
+        const objectPathWithExt = result.objectPath + ext;
+        
         return res.json({
           uploadURL: result.uploadURL,
-          objectPath: result.objectPath,
+          objectPath: objectPathWithExt,
           mode: "local",
           category,
           metadata: { name, size, contentType },
@@ -105,6 +117,7 @@ export function registerObjectStorageRoutes(app: Express): void {
     }
   });
 
+  // POST for multipart form uploads  
   app.post("/api/uploads/file", upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {
@@ -112,13 +125,38 @@ export function registerObjectStorageRoutes(app: Express): void {
       }
 
       const category = (req.body.category as string) || "misc";
-      const objectPath = await fileStorageService.saveLocalFile(
-        req.file.buffer,
-        req.file.originalname,
-        category
-      );
+      const targetPath = req.body.objectPath as string;
+      
+      let objectPath: string;
+      
+      // If objectPath provided, save to exact path for consistency
+      if (targetPath && targetPath.startsWith("/uploads/")) {
+        objectPath = await fileStorageService.saveToPath(req.file.buffer, targetPath);
+      } else if (fileStorageService.getMode() === "local") {
+        // In local mode without objectPath, generate path with extension from mimetype
+        const mimeToExt: Record<string, string> = {
+          "image/jpeg": ".jpg",
+          "image/png": ".png", 
+          "image/gif": ".gif",
+          "image/webp": ".webp",
+          "application/pdf": ".pdf",
+        };
+        const ext = mimeToExt[req.file.mimetype] || path.extname(req.file.originalname) || ".bin";
+        objectPath = await fileStorageService.saveLocalFile(
+          req.file.buffer,
+          `upload-${Date.now()}${ext}`,
+          category
+        );
+      } else {
+        // Replit mode without objectPath - generate new path
+        objectPath = await fileStorageService.saveLocalFile(
+          req.file.buffer,
+          req.file.originalname,
+          category
+        );
+      }
 
-      console.log(`[Object Storage] File uploaded successfully: ${objectPath}`);
+      console.log(`[Object Storage] File uploaded via POST: ${objectPath}`);
 
       res.json({
         objectPath,
@@ -127,6 +165,64 @@ export function registerObjectStorageRoutes(app: Express): void {
           name: req.file.originalname,
           size: req.file.size,
           contentType: req.file.mimetype,
+        },
+      });
+    } catch (error: any) {
+      console.error("[Object Storage] Error uploading file:", error);
+      res.status(500).json({ 
+        error: "Failed to upload file", 
+        details: error?.message 
+      });
+    }
+  });
+
+  // PUT for presigned-URL style uploads (raw body) - requires objectPath in query params
+  app.put("/api/uploads/file", express.raw({ type: "*/*", limit: "10mb" }), async (req, res) => {
+    try {
+      if (!req.body || !Buffer.isBuffer(req.body) || req.body.length === 0) {
+        return res.status(400).json({ error: "No file data provided" });
+      }
+
+      const contentType = req.headers["content-type"] || "application/octet-stream";
+      
+      // Validate MIME type
+      if (!ALLOWED_MIME_TYPES.includes(contentType)) {
+        return res.status(400).json({ 
+          error: `File type not allowed: ${contentType}`,
+          allowedTypes: ALLOWED_MIME_TYPES
+        });
+      }
+
+      const fileName = (req.query.name as string) || `upload-${Date.now()}`;
+      const targetPath = req.query.objectPath as string;
+      
+      // In local mode, require objectPath to ensure consistency
+      if (!targetPath) {
+        return res.status(400).json({
+          error: "objectPath is required for local mode uploads",
+          hint: "Use POST with multipart form data, or include objectPath from request-url response"
+        });
+      }
+      
+      // Validate objectPath format
+      if (!targetPath.startsWith("/uploads/")) {
+        return res.status(400).json({ 
+          error: "Invalid objectPath format",
+          hint: "objectPath must start with /uploads/" 
+        });
+      }
+      
+      const objectPath = await fileStorageService.saveToPath(req.body, targetPath);
+
+      console.log(`[Object Storage] File uploaded via PUT: ${objectPath}`);
+
+      res.json({
+        objectPath,
+        mode: "local",
+        metadata: {
+          name: fileName,
+          size: req.body.length,
+          contentType,
         },
       });
     } catch (error: any) {

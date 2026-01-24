@@ -52,8 +52,20 @@ export function useUpload(options: UseUploadOptions = {}) {
   );
 
   const uploadToPresignedUrl = useCallback(
-    async (file: File, uploadURL: string): Promise<void> => {
-      const response = await fetch(uploadURL, {
+    async (file: File, uploadURL: string, category?: string, objectPath?: string): Promise<void> => {
+      // For local mode, append filename, category, and objectPath as query params
+      let finalUrl = uploadURL;
+      if (uploadURL.startsWith("/api/uploads/file")) {
+        const params = new URLSearchParams();
+        params.set("name", file.name);
+        params.set("category", category || options.category || "misc");
+        if (objectPath) {
+          params.set("objectPath", objectPath);
+        }
+        finalUrl = `${uploadURL}?${params.toString()}`;
+      }
+      
+      const response = await fetch(finalUrl, {
         method: "PUT",
         body: file,
         headers: {
@@ -65,14 +77,17 @@ export function useUpload(options: UseUploadOptions = {}) {
         throw new Error("Failed to upload file to storage");
       }
     },
-    []
+    [options.category]
   );
 
   const uploadLocalFile = useCallback(
-    async (file: File, category?: string): Promise<UploadResponse> => {
+    async (file: File, category?: string, objectPath?: string): Promise<UploadResponse> => {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("category", category || options.category || "misc");
+      if (objectPath) {
+        formData.append("objectPath", objectPath);
+      }
 
       const response = await fetch("/api/uploads/file", {
         method: "POST",
@@ -101,14 +116,15 @@ export function useUpload(options: UseUploadOptions = {}) {
 
         if (uploadResponse.mode === "local") {
           setProgress(30);
-          const localResponse = await uploadLocalFile(file, category);
+          // Pass objectPath from request-url to ensure consistent path
+          const localResponse = await uploadLocalFile(file, category, uploadResponse.objectPath);
           setProgress(100);
           options.onSuccess?.(localResponse);
           return localResponse;
         }
 
         setProgress(30);
-        await uploadToPresignedUrl(file, uploadResponse.uploadURL);
+        await uploadToPresignedUrl(file, uploadResponse.uploadURL, category, uploadResponse.objectPath);
 
         setProgress(100);
         options.onSuccess?.(uploadResponse);

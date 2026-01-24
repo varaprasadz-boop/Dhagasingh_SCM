@@ -128,10 +128,25 @@ export class FileStorageService {
   async saveLocalFile(
     fileBuffer: Buffer,
     originalName: string,
-    category: string = "misc"
+    category: string = "misc",
+    contentType?: string
   ): Promise<string> {
     const fileId = randomUUID();
-    const ext = path.extname(originalName) || ".bin";
+    let ext = path.extname(originalName);
+    
+    // If no extension, try to derive from content type
+    if (!ext && contentType) {
+      const mimeToExt: Record<string, string> = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+        "application/pdf": ".pdf",
+      };
+      ext = mimeToExt[contentType] || ".bin";
+    }
+    
+    ext = ext || ".bin";
     const fileName = `${fileId}${ext}`;
     const filePath = path.join(this.config.uploadsDir, category, fileName);
 
@@ -141,6 +156,50 @@ export class FileStorageService {
     console.log(`[FileStorage] Saved file: ${filePath}`);
 
     return `/uploads/${category}/${fileName}`;
+  }
+
+  async saveToPath(
+    fileBuffer: Buffer,
+    objectPath: string
+  ): Promise<string> {
+    // Validate and sanitize objectPath to prevent path traversal
+    const allowedCategories = ["payment-proofs", "artwork", "misc"];
+    
+    // objectPath format: /uploads/category/filename.ext
+    const relativePath = objectPath.replace(/^\/uploads\//, "");
+    const parts = relativePath.split("/");
+    const category = parts[0] || "misc";
+    const fileName = parts.slice(1).join("/");
+    
+    if (!fileName) {
+      throw new Error("Invalid file path: no filename");
+    }
+    
+    // Security: validate category is allowed
+    if (!allowedCategories.includes(category)) {
+      throw new Error(`Invalid upload category: ${category}`);
+    }
+    
+    // Security: prevent path traversal
+    if (fileName.includes("..") || fileName.startsWith("/")) {
+      throw new Error("Invalid file path");
+    }
+    
+    // Validate filename doesn't escape category directory
+    const normalizedPath = path.normalize(path.join(category, fileName));
+    if (!normalizedPath.startsWith(category)) {
+      throw new Error("Invalid file path");
+    }
+    
+    const filePath = path.join(this.config.uploadsDir, category, fileName);
+
+    this.ensureUploadsDirExists();
+
+    await fs.promises.writeFile(filePath, fileBuffer);
+    console.log(`[FileStorage] Saved file to path: ${filePath}`);
+
+    // Return exact same objectPath to ensure consistency
+    return objectPath;
   }
 
   async deleteFile(objectPath: string): Promise<void> {
