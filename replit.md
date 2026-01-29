@@ -14,6 +14,7 @@ Preferred communication style: Simple, everyday language.
 - **Email**: b2bsales@dsscm.com
 - **Password**: b2btest123
 - **Role**: B2B Sales (full B2B permissions - clients, orders, invoices, payments)
+- **Required Permission**: VIEW_PRODUCTS (needed for product dropdown in order creation)
 
 ### Admin User
 - **Email**: admin@dsscm.com
