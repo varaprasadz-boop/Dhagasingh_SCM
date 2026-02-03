@@ -87,10 +87,6 @@ export default function Login() {
               )}
             </Button>
           </form>
-          <div className="mt-6 text-center text-sm text-muted-foreground">
-            <p>Demo credentials:</p>
-            <p className="font-mono">admin@dsscm.com / admin123</p>
-          </div>
         </CardContent>
       </Card>
     </div>
