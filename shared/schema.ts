@@ -792,6 +792,7 @@ export const b2bOrderItemInputSchema = z.object({
   productId: z.string().min(1, "Product is required"),
   productVariantId: z.string().min(1, "Variant is required"),
   quantity: z.number().min(1, "Quantity must be at least 1"),
+  unitPrice: z.number().min(0).optional(),
 });
 
 // B2B Order Creation payload schema with mandatory advance payment

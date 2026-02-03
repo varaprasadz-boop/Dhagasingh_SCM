@@ -27,6 +27,7 @@ const orderItemSchema = z.object({
   productId: z.string().min(1, "Product is required"),
   productVariantId: z.string().min(1, "Variant is required"),
   quantity: z.coerce.number().min(1, "Quantity must be at least 1"),
+  unitPrice: z.coerce.number().min(0).optional(),
 });
 
 const formSchema = z.object({
@@ -98,7 +99,7 @@ export default function B2BOrderCreate() {
       advanceDate: format(new Date(), "yyyy-MM-dd"),
       advanceReference: "",
       advanceProofUrl: "",
-      items: [{ productId: "", productVariantId: "", quantity: 1 }],
+      items: [{ productId: "", productVariantId: "", quantity: 1, unitPrice: undefined }],
     },
   });
 
@@ -518,7 +519,7 @@ export default function B2BOrderCreate() {
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => append({ productId: "", productVariantId: "", quantity: 1 })}
+                          onClick={() => append({ productId: "", productVariantId: "", quantity: 1, unitPrice: undefined })}
                           data-testid="button-add-product"
                         >
                           <Plus className="h-4 w-4 mr-1" />
@@ -533,7 +534,7 @@ export default function B2BOrderCreate() {
 
                           return (
                             <div key={field.id} className="flex items-start gap-3 p-4 border rounded-lg bg-muted/30">
-                              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div className="flex-1 grid grid-cols-1 md:grid-cols-4 gap-3">
                                 <FormField
                                   control={form.control}
                                   name={`items.${index}.productId`}
@@ -635,6 +636,29 @@ export default function B2BOrderCreate() {
                                       </FormItem>
                                     );
                                   }}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name={`items.${index}.unitPrice`}
+                                  render={({ field: f }) => (
+                                    <FormItem>
+                                      <FormLabel>Cost per t-shirt (₹)</FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type="number"
+                                          min={0}
+                                          step={0.01}
+                                          placeholder="0"
+                                          {...f}
+                                          value={f.value === undefined ? "" : f.value}
+                                          onChange={(e) => f.onChange(e.target.value === "" ? undefined : Number(e.target.value))}
+                                          data-testid={`input-unit-price-${index}`}
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
                                 />
                               </div>
 

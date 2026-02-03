@@ -34,9 +34,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Search, ShoppingCart, Calendar, User, DollarSign, Eye, ChevronDown, RefreshCw } from "lucide-react";
+import { Plus, Search, ShoppingCart, Calendar, User, DollarSign, Eye, ChevronDown, RefreshCw, Pencil } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
+import { useAuth } from "@/contexts/AuthContext";
 import type { B2BOrderWithDetails, B2BClient } from "@shared/schema";
 
 const orderFormSchema = z.object({
@@ -101,6 +102,8 @@ const paymentStatusColors: Record<string, string> = {
 const ITEMS_PER_PAGE = 10;
 
 export default function B2BOrders() {
+  const { hasPermission, isSuperAdmin } = useAuth();
+  const canEdit = isSuperAdmin || hasPermission("edit_b2b_orders");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -569,6 +572,14 @@ export default function B2BOrders() {
                       <RefreshCw className="h-4 w-4 mr-2" />
                       Update status
                     </Button>
+                    {canEdit && (
+                      <Link href={`/b2b/orders/${order.id}/edit`}>
+                        <Button variant="outline" size="sm" data-testid={`button-edit-${order.id}`}>
+                          <Pencil className="h-4 w-4 mr-2" />
+                          Edit
+                        </Button>
+                      </Link>
+                    )}
                     <Link href={`/b2b/orders/${order.id}`}>
                       <Button variant="outline" data-testid={`button-view-${order.id}`}>
                         <Eye className="h-4 w-4 mr-2" />

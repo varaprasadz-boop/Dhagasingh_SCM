@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Building2, ShoppingCart, DollarSign, Clock, TrendingUp, AlertTriangle } from "lucide-react";
+import { Building2, ShoppingCart, DollarSign, Clock, TrendingUp, AlertTriangle, Package } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import type { B2BOrder } from "@shared/schema";
@@ -16,6 +16,8 @@ interface DashboardStats {
   totalRevenue: number;
   amountReceived: number;
   amountPending: number;
+  totalTShirtsDelivered: number;
+  earningsDelivered: number;
   ordersByStatus: Record<string, number>;
   ordersByPaymentStatus: Record<string, number>;
   recentOrders: B2BOrder[];
@@ -154,6 +156,34 @@ export default function B2BDashboard() {
               {formatCurrency(stats?.amountPending || 0)}
             </div>
             <p className="text-xs text-muted-foreground">Awaiting collection</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total T-shirts (delivered)</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="stat-total-tshirts-delivered">
+              {stats?.totalTShirtsDelivered ?? 0}
+            </div>
+            <p className="text-xs text-muted-foreground">Item count from delivered orders only</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Earnings (delivered)</CardTitle>
+            <DollarSign className="h-4 w-4 text-emerald-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-emerald-600" data-testid="stat-earnings-delivered">
+              {formatCurrency(stats?.earningsDelivered ?? 0)}
+            </div>
+            <p className="text-xs text-muted-foreground">Amount received from delivered orders only</p>
           </CardContent>
         </Card>
       </div>

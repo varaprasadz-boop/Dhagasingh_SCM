@@ -37,6 +37,8 @@ import {
   Package,
   MapPin,
   ExternalLink,
+  Download,
+  ImageIcon,
 } from "lucide-react";
 import { Link, useParams } from "wouter";
 import { format } from "date-fns";
@@ -102,7 +104,7 @@ export default function B2BOrderDetail() {
   const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
   const [paymentReference, setPaymentReference] = useState("");
   const canEdit = isSuperAdmin || hasPermission("edit_b2b_orders");
-  const canDelete = isSuperAdmin || hasPermission("delete_b2b_orders");
+  const canDelete = isSuperAdmin;
 
   const { data: order, isLoading } = useQuery<B2BOrderWithDetails>({
     queryKey: ["/api/b2b/orders", params.id],
@@ -548,6 +550,37 @@ export default function B2BOrderDetail() {
         </CardContent>
       </Card>
 
+      {order.artwork && order.artwork.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <ImageIcon className="h-5 w-5" />
+              Artwork / High resolution logo
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">Uploaded files for this order. Download to view or use.</p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {order.artwork.map((file: { id: string; fileName: string; fileUrl: string; fileType?: string }) => (
+                <div key={file.id} className="flex items-center justify-between p-3 border rounded-lg">
+                  <span className="text-sm font-medium truncate flex-1 mr-2">{file.fileName}</span>
+                  <a
+                    href={file.fileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    download={file.fileName}
+                    className="inline-flex items-center gap-1 text-sm text-primary hover:underline shrink-0"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download
+                  </a>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {order.items && order.items.length > 0 && (
         <Card>
           <CardHeader>
@@ -555,29 +588,43 @@ export default function B2BOrderDetail() {
               <Package className="h-5 w-5" />
               Product Details
             </CardTitle>
-            <p className="text-sm text-muted-foreground">All items added when creating this order.</p>
+            <p className="text-sm text-muted-foreground">Size-wise, color with quantity. Total quantity of the order below.</p>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {order.items.map((item: B2BOrderItem & { product?: { name: string } }) => (
-                <div key={item.id} className="flex items-center justify-between p-3 border rounded-lg">
-                  <div>
-                    <p className="font-medium">{(item as { product?: { name: string } }).product?.name ?? "Product"}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {[item.variantSku, item.variantColor, item.variantSize].filter(Boolean).join(" • ") || "—"}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-medium">Qty: {item.quantity}</p>
-                    {(item.unitPrice != null || item.totalPrice != null) && (
-                      <p className="text-xs text-muted-foreground">
-                        {item.unitPrice != null && `₹${item.unitPrice} each`}
-                        {item.totalPrice != null && ` • Total ₹${item.totalPrice}`}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="text-left font-medium p-3">Product</th>
+                    <th className="text-left font-medium p-3">Color</th>
+                    <th className="text-left font-medium p-3">Size</th>
+                    <th className="text-right font-medium p-3">Qty</th>
+                    <th className="text-right font-medium p-3">Unit price</th>
+                    <th className="text-right font-medium p-3">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {order.items.map((item: B2BOrderItem & { product?: { name: string } }) => (
+                    <tr key={item.id} className="border-b last:border-0">
+                      <td className="p-3 font-medium">{(item as { product?: { name: string } }).product?.name ?? "Product"}</td>
+                      <td className="p-3 text-muted-foreground">{item.variantColor ?? "—"}</td>
+                      <td className="p-3 text-muted-foreground">{item.variantSize ?? "—"}</td>
+                      <td className="p-3 text-right font-medium">{item.quantity}</td>
+                      <td className="p-3 text-right">{item.unitPrice != null ? `₹${item.unitPrice}` : "—"}</td>
+                      <td className="p-3 text-right">{item.totalPrice != null ? `₹${item.totalPrice}` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 bg-muted/30 font-medium">
+                    <td colSpan={3} className="p-3">Total quantity (order)</td>
+                    <td className="p-3 text-right">
+                      {order.items.reduce((sum: number, item: B2BOrderItem) => sum + (item.quantity ?? 0), 0)}
+                    </td>
+                    <td colSpan={2} className="p-3" />
+                  </tr>
+                </tfoot>
+              </table>
             </div>
           </CardContent>
         </Card>

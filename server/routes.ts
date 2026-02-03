@@ -2160,11 +2160,18 @@ export async function registerRoutes(
           paymentStatus: "advance_received",
           createdBy: req.user!.id,
         },
-        items.map(item => ({
-          productId: item.productId,
-          productVariantId: item.productVariantId,
-          quantity: item.quantity,
-        }))
+        items.map(item => {
+          const unitPrice = item.unitPrice != null ? String(item.unitPrice) : undefined;
+          const qty = item.quantity ?? 0;
+          const totalPrice = item.unitPrice != null && qty > 0 ? String(Number(item.unitPrice) * qty) : undefined;
+          return {
+            productId: item.productId,
+            productVariantId: item.productVariantId,
+            quantity: item.quantity,
+            unitPrice,
+            totalPrice,
+          };
+        })
       );
       res.status(201).json(order);
     } catch (error) {

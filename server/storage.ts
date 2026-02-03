@@ -287,6 +287,10 @@ export interface B2BDashboardStats {
   monthlyRevenue: number;
   amountReceived: number;
   amountPending: number;
+  /** Total t-shirts (sum of item quantities) for delivered orders only */
+  totalTShirtsDelivered: number;
+  /** Earnings (amount received) for delivered orders only */
+  earningsDelivered: number;
   ordersByStatus: Record<string, number>;
   ordersByPaymentStatus: Record<string, number>;
   recentOrders: B2BOrder[];
@@ -1921,6 +1925,18 @@ class DatabaseStorage implements IStorage {
         ordersByPaymentStatus[order.paymentStatus] = (ordersByPaymentStatus[order.paymentStatus] || 0) + 1;
       }
       
+      // Delivered orders only: total t-shirts (sum of item qty) and earnings (amount received)
+      const deliveredOrders = allOrders.filter(o => o.status === "delivered");
+      const deliveredOrderIds = deliveredOrders.map(o => o.id);
+      let totalTShirtsDelivered = 0;
+      if (deliveredOrderIds.length > 0) {
+        const deliveredItems = await db.select({ quantity: b2bOrderItems.quantity })
+          .from(b2bOrderItems)
+          .where(inArray(b2bOrderItems.orderId, deliveredOrderIds));
+        totalTShirtsDelivered = deliveredItems.reduce((sum, row) => sum + (row.quantity ?? 0), 0);
+      }
+      const earningsDelivered = deliveredOrders.reduce((sum, o) => sum + (parseFloat(o.amountReceived as string) || 0), 0);
+      
       const recentOrders = allOrders.slice(0, 10);
       
       // Get recent payments (for user's orders)
@@ -1986,6 +2002,8 @@ class DatabaseStorage implements IStorage {
         monthlyRevenue,
         amountReceived,
         amountPending,
+        totalTShirtsDelivered,
+        earningsDelivered,
         ordersByStatus,
         ordersByPaymentStatus,
         recentOrders,
