@@ -23,19 +23,191 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Package, Eye, Loader2, Trash2, Upload } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Plus, Package, Eye, Loader2, Trash2, Upload, Pencil } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ProductImportModal } from "@/components/ProductImportModal";
 import type { ProductWithVariants, ProductVariant } from "@shared/schema";
+import type { UseMutationResult } from "@tanstack/react-query";
+
+function EditProductDialog({
+  product,
+  open,
+  onOpenChange,
+  onSuccess,
+  updateProductMutation,
+  updateVariantMutation,
+}: {
+  product: ProductWithVariants;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSuccess: () => void;
+  updateProductMutation: UseMutationResult<unknown, Error, { id: string; data: { name?: string; description?: string; category?: string; isActive?: boolean } }>;
+  updateVariantMutation: UseMutationResult<unknown, Error, { id: string; data: Partial<{ stockQuantity: number; costPrice: string; sellingPrice: string }> }>;
+}) {
+  const [name, setName] = useState(product.name);
+  const [description, setDescription] = useState(product.description ?? "");
+  const [category, setCategory] = useState(product.category ?? "");
+  const [isActive, setIsActive] = useState((product as ProductWithVariants & { isActive?: boolean }).isActive !== false);
+  const [variants, setVariants] = useState(
+    product.variants.map((v) => ({
+      id: v.id,
+      sku: v.sku,
+      color: v.color ?? "",
+      size: v.size ?? "",
+      stockQuantity: v.stockQuantity,
+      costPrice: String(v.costPrice ?? "0"),
+      sellingPrice: String(v.sellingPrice ?? "0"),
+    }))
+  );
+
+  const handleSave = async () => {
+    updateProductMutation.mutate(
+      { id: product.id, data: { name, description, category, isActive } },
+      {
+        onSuccess: () => {
+          variants.forEach((v) => {
+            const orig = product.variants.find((p) => p.id === v.id);
+            if (!orig) return;
+            const changed =
+              orig.stockQuantity !== v.stockQuantity ||
+              String(orig.costPrice) !== v.costPrice ||
+              String(orig.sellingPrice) !== v.sellingPrice;
+            if (changed) {
+              updateVariantMutation.mutate({
+                id: v.id,
+                data: {
+                  stockQuantity: v.stockQuantity,
+                  costPrice: v.costPrice,
+                  sellingPrice: v.sellingPrice,
+                },
+              });
+            }
+          });
+          onSuccess();
+        },
+      }
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto" data-testid="dialog-edit-product">
+        <DialogHeader>
+          <DialogTitle>Edit Product</DialogTitle>
+          <DialogDescription>Update product details and variant prices/stock.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Product Name</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} data-testid="edit-product-name" />
+          </div>
+          <div className="space-y-2">
+            <Label>Category</Label>
+            <Input value={category} onChange={(e) => setCategory(e.target.value)} data-testid="edit-product-category" />
+          </div>
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} data-testid="edit-product-description" />
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-4">
+            <div>
+              <Label>Active</Label>
+              <p className="text-xs text-muted-foreground">Inactive products can be hidden from listings.</p>
+            </div>
+            <Switch checked={isActive} onCheckedChange={setIsActive} data-testid="edit-product-active" />
+          </div>
+          <div>
+            <Label className="mb-2 block">Variants</Label>
+            <div className="space-y-3 max-h-[300px] overflow-y-auto">
+              {variants.map((v, i) => (
+                <div key={v.id} className="p-3 border rounded-lg space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">{v.sku} {v.color && `• ${v.color}`} {v.size && `• ${v.size}`}</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <Label className="text-xs">Stock</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={v.stockQuantity}
+                        onChange={(e) =>
+                          setVariants((prev) => {
+                            const next = [...prev];
+                            next[i] = { ...next[i], stockQuantity: parseInt(e.target.value, 10) || 0 };
+                            return next;
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Cost (₹)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={v.costPrice}
+                        onChange={(e) =>
+                          setVariants((prev) => {
+                            const next = [...prev];
+                            next[i] = { ...next[i], costPrice: e.target.value };
+                            return next;
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Selling (₹)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={v.sellingPrice}
+                        onChange={(e) =>
+                          setVariants((prev) => {
+                            const next = [...prev];
+                            next[i] = { ...next[i], sellingPrice: e.target.value };
+                            return next;
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={updateProductMutation.isPending}
+            data-testid="button-save-edit-product"
+          >
+            {updateProductMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default function Products() {
   const { toast } = useToast();
+  const { hasPermission, isSuperAdmin } = useAuth();
+  const canEdit = isSuperAdmin || hasPermission("edit_products");
   const [searchQuery, setSearchQuery] = useState("");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<ProductWithVariants | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<ProductWithVariants | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<ProductWithVariants | null>(null);
 
@@ -101,6 +273,29 @@ export default function Products() {
     },
   });
 
+  const updateProductMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { name?: string; description?: string; category?: string; isActive?: boolean } }) =>
+      apiRequest("PATCH", `/api/products/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      toast({ title: "Product updated successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to update product", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const updateVariantMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<{ stockQuantity: number; costPrice: string; sellingPrice: string }> }) =>
+      apiRequest("PATCH", `/api/variants/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to update variant", description: error.message, variant: "destructive" });
+    },
+  });
+
   const filteredProducts = products.filter(
     (p) =>
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -112,13 +307,18 @@ export default function Products() {
       key: "name",
       header: "Product",
       sortable: true,
-      render: (p: ProductWithVariants) => (
+      render: (p: ProductWithVariants & { isActive?: boolean }) => (
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded bg-muted flex items-center justify-center">
             <Package className="h-5 w-5 text-muted-foreground" />
           </div>
           <div>
-            <p className="font-medium">{p.name}</p>
+            <div className="flex items-center gap-2">
+              <p className="font-medium">{p.name}</p>
+              {(p as { isActive?: boolean }).isActive === false && (
+                <Badge variant="secondary">Inactive</Badge>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground">{p.category || "Uncategorized"}</p>
           </div>
         </div>
@@ -397,7 +597,12 @@ export default function Products() {
           {selectedProduct && (
             <>
               <SheetHeader>
-                <SheetTitle>{selectedProduct.name}</SheetTitle>
+                <SheetTitle className="flex items-center gap-2">
+                  {selectedProduct.name}
+                  {(selectedProduct as ProductWithVariants & { isActive?: boolean }).isActive === false && (
+                    <Badge variant="secondary">Inactive</Badge>
+                  )}
+                </SheetTitle>
               </SheetHeader>
               <div className="space-y-6 mt-6">
                 <div>
@@ -414,7 +619,20 @@ export default function Products() {
                   </p>
                   <ProductVariantTable variants={selectedProduct.variants as any} />
                 </div>
-                <div className="pt-4">
+                <div className="pt-4 flex gap-2">
+                  {canEdit && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setEditingProduct(selectedProduct);
+                        setEditDialogOpen(true);
+                      }}
+                      data-testid="button-edit-product"
+                    >
+                      <Pencil className="h-4 w-4 mr-2" />
+                      Edit Product
+                    </Button>
+                  )}
                   <Button
                     variant="destructive"
                     onClick={() => {
@@ -457,6 +675,22 @@ export default function Products() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {editingProduct && (
+        <EditProductDialog
+          key={editingProduct.id}
+          product={editingProduct}
+          open={editDialogOpen}
+          onOpenChange={setEditDialogOpen}
+          onSuccess={() => {
+            setEditDialogOpen(false);
+            setEditingProduct(null);
+            queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+          }}
+          updateProductMutation={updateProductMutation}
+          updateVariantMutation={updateVariantMutation}
+        />
+      )}
 
       <ProductImportModal open={importModalOpen} onOpenChange={setImportModalOpen} />
     </div>

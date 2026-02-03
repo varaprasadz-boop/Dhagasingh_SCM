@@ -29,15 +29,30 @@ import {
   Building2,
   Calendar,
   DollarSign,
-  Clock,
   RefreshCw,
-  Plus,
   FileText,
   CreditCard,
+  Pencil,
+  Trash2,
+  Package,
+  MapPin,
+  ExternalLink,
 } from "lucide-react";
 import { Link, useParams } from "wouter";
 import { format } from "date-fns";
-import type { B2BOrderWithDetails, B2BPaymentMilestone, B2BPayment } from "@shared/schema";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import type { B2BOrderWithDetails, B2BPaymentMilestone, B2BPayment, B2BOrderItem } from "@shared/schema";
 
 const statusLabels: Record<string, string> = {
   order_received: "Order Received",
@@ -49,6 +64,7 @@ const statusLabels: Record<string, string> = {
   packed: "Packed",
   dispatched: "Dispatched",
   delivered: "Delivered",
+  closed: "Closed",
   completed: "Completed",
   cancelled: "Cancelled",
 };
@@ -63,6 +79,7 @@ const statusFlow = [
   "packed",
   "dispatched",
   "delivered",
+  "closed",
   "completed",
 ];
 
@@ -75,6 +92,8 @@ const paymentStatusLabels: Record<string, string> = {
 
 export default function B2BOrderDetail() {
   const params = useParams<{ id: string }>();
+  const { toast } = useToast();
+  const { hasPermission, isSuperAdmin } = useAuth();
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [newStatus, setNewStatus] = useState("");
@@ -82,7 +101,8 @@ export default function B2BOrderDetail() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
   const [paymentReference, setPaymentReference] = useState("");
-  const { toast } = useToast();
+  const canEdit = isSuperAdmin || hasPermission("edit_b2b_orders");
+  const canDelete = isSuperAdmin || hasPermission("delete_b2b_orders");
 
   const { data: order, isLoading } = useQuery<B2BOrderWithDetails>({
     queryKey: ["/api/b2b/orders", params.id],
@@ -129,6 +149,19 @@ export default function B2BOrderDetail() {
     },
     onError: () => {
       toast({ title: "Failed to record payment", variant: "destructive" });
+    },
+  });
+
+  const deleteOrderMutation = useMutation({
+    mutationFn: () => apiRequest("DELETE", `/api/b2b/orders/${params.id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/b2b/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/b2b/dashboard"] });
+      toast({ title: "Order deleted" });
+      window.location.href = "/b2b/orders";
+    },
+    onError: () => {
+      toast({ title: "Failed to delete order", variant: "destructive" });
     },
   });
 
@@ -199,7 +232,43 @@ export default function B2BOrderDetail() {
             Created {format(new Date(order.createdAt), "MMMM d, yyyy 'at' h:mm a")}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          {canEdit && (
+            <Link href={`/b2b/orders/${params.id}/edit`}>
+              <Button variant="outline" data-testid="button-edit-order">
+                <Pencil className="h-4 w-4 mr-2" />
+                Edit Order
+              </Button>
+            </Link>
+          )}
+          {canDelete && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" data-testid="button-delete-order">
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Order
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this order?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete order {order.orderNumber} and all related items, artwork, and history. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => deleteOrderMutation.mutate()}
+                    disabled={deleteOrderMutation.isPending}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    {deleteOrderMutation.isPending ? "Deleting..." : "Delete"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
           <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" data-testid="button-add-payment">
@@ -395,6 +464,18 @@ export default function B2BOrderDetail() {
               <span className="text-muted-foreground">Artwork Status:</span>
               <Badge variant="outline">{order.artworkStatus}</Badge>
             </div>
+            {order.printingType && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Printing Type:</span>
+                <span>{order.printingType.name}</span>
+              </div>
+            )}
+            {order.eventType && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Event Type:</span>
+                <span>{order.eventType}</span>
+              </div>
+            )}
             {order.requiredDeliveryDate && (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Required Delivery:</span>
@@ -449,6 +530,59 @@ export default function B2BOrderDetail() {
         </Card>
       </div>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <MapPin className="h-5 w-5" />
+            Delivery Address
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm">
+          <p className="whitespace-pre-wrap">{order.deliveryAddress}</p>
+          {(order.deliveryCity || order.deliveryState || order.deliveryZip || order.deliveryCountry) && (
+            <p className="mt-2 text-muted-foreground">
+              {[order.deliveryCity, order.deliveryState, order.deliveryZip].filter(Boolean).join(", ")}
+              {order.deliveryCountry && (order.deliveryCity || order.deliveryState || order.deliveryZip) ? `, ${order.deliveryCountry}` : order.deliveryCountry ?? ""}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {order.items && order.items.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Product Details
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">All items added when creating this order.</p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {order.items.map((item: B2BOrderItem & { product?: { name: string } }) => (
+                <div key={item.id} className="flex items-center justify-between p-3 border rounded-lg">
+                  <div>
+                    <p className="font-medium">{(item as { product?: { name: string } }).product?.name ?? "Product"}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {[item.variantSku, item.variantColor, item.variantSize].filter(Boolean).join(" • ") || "—"}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-medium">Qty: {item.quantity}</p>
+                    {(item.unitPrice != null || item.totalPrice != null) && (
+                      <p className="text-xs text-muted-foreground">
+                        {item.unitPrice != null && `₹${item.unitPrice} each`}
+                        {item.totalPrice != null && ` • Total ₹${item.totalPrice}`}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {order.specialInstructions && (
         <Card>
           <CardHeader>
@@ -464,6 +598,7 @@ export default function B2BOrderDetail() {
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Payment History</CardTitle>
+            <p className="text-sm text-muted-foreground">All payments recorded for this order.</p>
           </CardHeader>
           <CardContent>
             {orderPayments && orderPayments.length > 0 ? (
@@ -478,6 +613,17 @@ export default function B2BOrderDetail() {
                       <p className="text-xs text-muted-foreground">
                         {payment.paymentMode} • {payment.transactionRef || "No ref"}
                       </p>
+                      {payment.proofUrl && (
+                        <a
+                          href={payment.proofUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-primary hover:underline inline-flex items-center gap-1 mt-1"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          View proof
+                        </a>
+                      )}
                     </div>
                     <span className="text-sm text-muted-foreground">
                       {format(new Date(payment.paymentDate), "MMM d, yyyy")}

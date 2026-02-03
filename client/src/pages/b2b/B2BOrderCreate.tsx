@@ -56,12 +56,28 @@ type FormData = z.infer<typeof formSchema>;
 
 type ProductWithVariants = Product & { variants: ProductVariant[] };
 
+const ARTWORK_SLOTS = 5;
+const ARTWORK_ACCEPT = ".pdf,.png,.jpg,.jpeg,.xlsx,.xls";
+
+const INDIAN_STATES = [
+  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
+  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
+  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
+  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
+  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+  "Delhi", "Jammu and Kashmir", "Ladakh", "Puducherry",
+];
+
+type ArtworkSlot = { objectPath: string; fileName: string; fileType: string } | null;
+
 export default function B2BOrderCreate() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [step, setStep] = useState(1);
   const [advanceProofName, setAdvanceProofName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [artworkFiles, setArtworkFiles] = useState<ArtworkSlot[]>(Array(ARTWORK_SLOTS).fill(null));
+  const artworkSlotRef = useRef<number>(0);
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -105,7 +121,32 @@ export default function B2BOrderCreate() {
     },
   });
 
+  const { uploadFile: uploadArtworkFile, isUploading: isArtworkUploading } = useUpload({
+    category: "artwork",
+    onSuccess: (response) => {
+      const slot = artworkSlotRef.current;
+      setArtworkFiles((prev) => {
+        const next = [...prev];
+        next[slot] = {
+          objectPath: response.objectPath,
+          fileName: response.metadata?.name ?? "file",
+          fileType: response.metadata?.contentType ?? "",
+        };
+        return next;
+      });
+      toast({ title: `Artwork file ${slot + 1} uploaded` });
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to upload artwork file",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const advanceProofUrl = form.watch("advanceProofUrl");
+  const artworkStatus = form.watch("artworkStatus");
 
   const { data: clients = [] } = useQuery<B2BClient[]>({
     queryKey: ["/api/b2b/clients"],
@@ -120,9 +161,27 @@ export default function B2BOrderCreate() {
   });
 
   const createOrderMutation = useMutation({
-    mutationFn: async (data: FormData) => {
+    mutationFn: async (payload: { data: FormData; artworkFiles: ArtworkSlot[] }) => {
+      const { data, artworkFiles: files } = payload;
       const response = await apiRequest("POST", "/api/b2b/orders", data);
-      return response.json();
+      const order = await response.json();
+      const toUpload = files.filter((s): s is NonNullable<ArtworkSlot> => s !== null);
+      for (let i = 0; i < toUpload.length; i++) {
+        try {
+          await apiRequest("POST", `/api/b2b/orders/${order.id}/artwork`, {
+            fileName: toUpload[i].fileName,
+            fileUrl: toUpload[i].objectPath,
+            fileType: toUpload[i].fileType || undefined,
+          });
+        } catch (err) {
+          console.error("Artwork upload failed for file", i + 1, err);
+          toast({
+            title: `Artwork file ${i + 1} could not be attached`,
+            variant: "destructive",
+          });
+        }
+      }
+      return order;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/b2b/orders"] });
@@ -184,7 +243,7 @@ export default function B2BOrderCreate() {
       });
       return;
     }
-    createOrderMutation.mutate(data);
+    createOrderMutation.mutate({ data, artworkFiles });
   };
 
   const handleFormSubmit = () => {
@@ -341,7 +400,13 @@ export default function B2BOrderCreate() {
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Artwork Status</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value}>
+                            <Select
+                              onValueChange={(v) => {
+                                field.onChange(v);
+                                if (v !== "received") setArtworkFiles(Array(ARTWORK_SLOTS).fill(null));
+                              }}
+                              value={field.value}
+                            >
                               <FormControl>
                                 <SelectTrigger data-testid="select-artwork-status">
                                   <SelectValue />
@@ -358,6 +423,68 @@ export default function B2BOrderCreate() {
                           </FormItem>
                         )}
                       />
+
+                      {artworkStatus === "received" && (
+                        <div className="md:col-span-2 space-y-2">
+                          <Label>Artwork files (PDF, PNG, XLSX, etc.) — up to 5</Label>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+                            {Array.from({ length: ARTWORK_SLOTS }).map((_, i) => (
+                              <div key={i} className="space-y-1">
+                                <input
+                                  type="file"
+                                  accept={ARTWORK_ACCEPT}
+                                  className="hidden"
+                                  id={`artwork-file-${i}`}
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    artworkSlotRef.current = i;
+                                    await uploadArtworkFile(file);
+                                    e.target.value = "";
+                                  }}
+                                  data-testid={`input-artwork-${i}`}
+                                />
+                                <Label
+                                  htmlFor={`artwork-file-${i}`}
+                                  className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-3 cursor-pointer hover:bg-muted/50 text-xs"
+                                >
+                                  {artworkFiles[i] ? (
+                                    <>
+                                      <CheckCircle className="h-5 w-5 text-green-600 mb-1" />
+                                      <span className="truncate w-full text-center">{artworkFiles[i]!.fileName}</span>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6 mt-1"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setArtworkFiles((prev) => {
+                                            const next = [...prev];
+                                            next[i] = null;
+                                            return next;
+                                          });
+                                        }}
+                                        data-testid={`button-remove-artwork-${i}`}
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </Button>
+                                    </>
+                                  ) : isArtworkUploading && artworkSlotRef.current === i ? (
+                                    <Loader2 className="h-5 w-5 animate-spin" />
+                                  ) : (
+                                    <>
+                                      <Upload className="h-5 w-5 mb-1 text-muted-foreground" />
+                                      <span>Slot {i + 1}</span>
+                                    </>
+                                  )}
+                                </Label>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       <FormField
                         control={form.control}
@@ -816,15 +943,49 @@ export default function B2BOrderCreate() {
                       <FormField
                         control={form.control}
                         name="deliveryState"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>State</FormLabel>
-                            <FormControl>
-                              <Input placeholder="State" {...field} data-testid="input-delivery-state" />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
+                        render={({ field }) => {
+                          const stateValue = field.value;
+                          const isFromList = INDIAN_STATES.includes(stateValue);
+                          const selectValue = isFromList ? stateValue : stateValue ? "Other" : "";
+                          return (
+                            <FormItem>
+                              <FormLabel>State</FormLabel>
+                              <Select
+                                value={selectValue}
+                                onValueChange={(v) => {
+                                  if (v === "Other") {
+                                    field.onChange("");
+                                  } else {
+                                    field.onChange(v);
+                                  }
+                                }}
+                              >
+                                <FormControl>
+                                  <SelectTrigger data-testid="select-delivery-state">
+                                    <SelectValue placeholder="Select state" />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  {INDIAN_STATES.map((s) => (
+                                    <SelectItem key={s} value={s}>
+                                      {s}
+                                    </SelectItem>
+                                  ))}
+                                  <SelectItem value="Other">Other</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              {selectValue === "Other" && (
+                                <Input
+                                  placeholder="Enter state"
+                                  value={stateValue}
+                                  onChange={(e) => field.onChange(e.target.value)}
+                                  data-testid="input-delivery-state-other"
+                                />
+                              )}
+                              <FormMessage />
+                            </FormItem>
+                          );
+                        }}
                       />
 
                       <FormField

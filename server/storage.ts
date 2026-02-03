@@ -1553,7 +1553,8 @@ class DatabaseStorage implements IStorage {
         where: eq(b2bOrders.id, id),
         with: {
           client: true,
-          items: true,
+          printingType: true,
+          items: { with: { product: true } },
           artwork: true,
           statusHistory: true,
           invoices: true,
@@ -1575,7 +1576,8 @@ class DatabaseStorage implements IStorage {
         where: eq(b2bOrders.orderNumber, orderNumber),
         with: {
           client: true,
-          items: true,
+          printingType: true,
+          items: { with: { product: true } },
           artwork: true,
           statusHistory: true,
           invoices: true,

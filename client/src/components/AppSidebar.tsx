@@ -100,6 +100,8 @@ export function AppSidebar() {
     return true;
   });
 
+  const hasAnyEcommerce = isSuperAdmin || navItems.some((item) => item.permission && hasPermission(item.permission));
+
   const getRoleName = () => {
     if (isSuperAdmin) return "Super Admin";
     if (user?.role) return user.role.name;
@@ -121,30 +123,32 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>eCommerce</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {filteredItems.map((item) => {
-                const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path) && !location.startsWith("/b2b"));
-                return (
-                  <SidebarMenuItem key={item.path}>
-                    <SidebarMenuButton asChild isActive={isActive}>
-                      <Link
-                        href={item.path}
-                        className="flex items-center gap-3"
-                        data-testid={`nav-${item.label.toLowerCase().replace(" ", "-")}`}
-                      >
-                        <item.icon className="h-4 w-4" />
-                        <span>{item.label}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {hasAnyEcommerce && (
+          <SidebarGroup>
+            <SidebarGroupLabel>eCommerce</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {filteredItems.map((item) => {
+                  const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path) && !location.startsWith("/b2b"));
+                  return (
+                    <SidebarMenuItem key={item.path}>
+                      <SidebarMenuButton asChild isActive={isActive}>
+                        <Link
+                          href={item.path}
+                          className="flex items-center gap-3"
+                          data-testid={`nav-${item.label.toLowerCase().replace(" ", "-")}`}
+                        >
+                          <item.icon className="h-4 w-4" />
+                          <span>{item.label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         {filteredB2BItems.length > 0 && (
           <SidebarGroup>

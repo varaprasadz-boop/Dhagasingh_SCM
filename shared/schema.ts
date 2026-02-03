@@ -107,6 +107,7 @@ export const products = pgTable("products", {
   name: text("name").notNull(),
   description: text("description"),
   category: text("category"),
+  isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

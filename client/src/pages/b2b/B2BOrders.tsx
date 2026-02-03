@@ -33,7 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Search, ShoppingCart, Calendar, User, DollarSign, Eye, ChevronDown } from "lucide-react";
+import { Plus, Search, ShoppingCart, Calendar, User, DollarSign, Eye, ChevronDown, RefreshCw } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import type { B2BOrderWithDetails, B2BClient } from "@shared/schema";
@@ -63,6 +63,7 @@ const statusLabels: Record<string, string> = {
   packed: "Packed",
   dispatched: "Dispatched",
   delivered: "Delivered",
+  closed: "Closed",
   completed: "Completed",
   cancelled: "Cancelled",
 };
@@ -77,6 +78,7 @@ const statusColors: Record<string, string> = {
   packed: "bg-lime-100 text-lime-800",
   dispatched: "bg-sky-100 text-sky-800",
   delivered: "bg-green-100 text-green-800",
+  closed: "bg-emerald-100 text-emerald-800",
   completed: "bg-emerald-100 text-emerald-800",
   cancelled: "bg-red-100 text-red-800",
 };
@@ -102,6 +104,10 @@ export default function B2BOrders() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+  const [statusOrderId, setStatusOrderId] = useState<string | null>(null);
+  const [quickStatus, setQuickStatus] = useState("");
+  const [quickStatusComment, setQuickStatusComment] = useState("");
   const { toast } = useToast();
 
   const { data: orders, isLoading } = useQuery<B2BOrderWithDetails[]>({
@@ -150,6 +156,35 @@ export default function B2BOrders() {
 
   const handleSubmit = (data: OrderFormData) => {
     createMutation.mutate(data);
+  };
+
+  const updateStatusMutation = useMutation({
+    mutationFn: ({ orderId, status, comment }: { orderId: string; status: string; comment: string }) =>
+      apiRequest("POST", `/api/b2b/orders/${orderId}/status`, { status, comment }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/b2b/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/b2b/dashboard"] });
+      toast({ title: "Status updated successfully" });
+      setStatusDialogOpen(false);
+      setStatusOrderId(null);
+      setQuickStatus("");
+      setQuickStatusComment("");
+    },
+    onError: () => {
+      toast({ title: "Failed to update status", variant: "destructive" });
+    },
+  });
+
+  const openStatusDialog = (orderId: string) => {
+    setStatusOrderId(orderId);
+    setQuickStatus("");
+    setQuickStatusComment("");
+    setStatusDialogOpen(true);
+  };
+
+  const handleQuickStatusUpdate = () => {
+    if (!statusOrderId || !quickStatus) return;
+    updateStatusMutation.mutate({ orderId: statusOrderId, status: quickStatus, comment: quickStatusComment });
   };
 
   const filteredOrders = orders?.filter((order) => {
@@ -404,6 +439,52 @@ export default function B2BOrders() {
         </Dialog>
       )}
 
+      <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Update Order Status</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>New Status</Label>
+              <Select value={quickStatus} onValueChange={setQuickStatus}>
+                <SelectTrigger data-testid="select-quick-status">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(statusLabels).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Comment (optional)</Label>
+              <Textarea
+                value={quickStatusComment}
+                onChange={(e) => setQuickStatusComment(e.target.value)}
+                placeholder="Comment about this status change"
+                data-testid="input-quick-status-comment"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleQuickStatusUpdate}
+                disabled={!quickStatus || updateStatusMutation.isPending}
+                data-testid="button-save-quick-status"
+              >
+                {updateStatusMutation.isPending ? "Updating..." : "Update"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -478,6 +559,15 @@ export default function B2BOrders() {
                       <p className="text-sm text-muted-foreground">Pending</p>
                       <p className="font-medium text-amber-600">{formatCurrency(order.balancePending)}</p>
                     </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openStatusDialog(order.id)}
+                      data-testid={`button-status-${order.id}`}
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Update status
+                    </Button>
                     <Link href={`/b2b/orders/${order.id}`}>
                       <Button variant="outline" data-testid={`button-view-${order.id}`}>
                         <Eye className="h-4 w-4 mr-2" />
