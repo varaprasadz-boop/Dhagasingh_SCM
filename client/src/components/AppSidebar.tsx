@@ -100,7 +100,12 @@ export function AppSidebar() {
     return true;
   });
 
-  const hasAnyEcommerce = isSuperAdmin || navItems.some((item) => item.permission && hasPermission(item.permission));
+  // B2B sales agents (have B2B access but not view_all_b2b_data) should not see eCommerce section
+  const hasB2BAccess = b2bNavItems.some((item) => item.permission && hasPermission(item.permission));
+  const isB2BSalesOnly = hasB2BAccess && !isSuperAdmin && !hasPermission("view_all_b2b_data");
+  const hasAnyEcommerce =
+    !isB2BSalesOnly &&
+    (isSuperAdmin || navItems.some((item) => item.permission && hasPermission(item.permission)));
 
   const getRoleName = () => {
     if (isSuperAdmin) return "Super Admin";
