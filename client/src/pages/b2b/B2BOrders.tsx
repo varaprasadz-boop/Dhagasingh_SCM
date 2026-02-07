@@ -513,28 +513,28 @@ export default function B2BOrders() {
             data-testid="input-search"
           />
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[200px]" data-testid="select-status-filter">
-            <SelectValue placeholder="Filter by status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            {Object.entries(statusLabels).map(([value, label]) => (
-              <SelectItem key={value} value={value}>
-                {label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
         <Select value={agentFilter} onValueChange={setAgentFilter}>
           <SelectTrigger className="w-[200px]" data-testid="select-agent-filter">
-            <SelectValue placeholder="Filter by agent" />
+            <SelectValue placeholder="All agents" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Agents</SelectItem>
             {agentOptions.map((agent) => (
               <SelectItem key={agent.id} value={agent.id}>
                 {agent.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-[200px]" data-testid="select-status-filter">
+            <SelectValue placeholder="Show all statuses" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            {Object.entries(statusLabels).map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
               </SelectItem>
             ))}
           </SelectContent>

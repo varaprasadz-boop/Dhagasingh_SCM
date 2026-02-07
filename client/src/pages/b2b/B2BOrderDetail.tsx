@@ -550,16 +550,18 @@ export default function B2BOrderDetail() {
         </CardContent>
       </Card>
 
-      {order.artwork && order.artwork.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <ImageIcon className="h-5 w-5" />
-              Artwork / High resolution logo
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">Uploaded files for this order. Download to view or use.</p>
-          </CardHeader>
-          <CardContent>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <ImageIcon className="h-5 w-5" />
+            View and download uploads
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Artwork and high-resolution files for this order. View or download below.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {order.artwork && order.artwork.length > 0 ? (
             <div className="space-y-3">
               {order.artwork.map((file: { id: string; fileName: string; fileUrl: string; fileType?: string }) => (
                 <div key={file.id} className="flex items-center justify-between p-3 border rounded-lg gap-2">
@@ -572,7 +574,7 @@ export default function B2BOrderDetail() {
                       data-testid={`button-view-upload-${file.id}`}
                     >
                       <a
-                        href={file.fileUrl}
+                        href={file.fileUrl.startsWith("http") ? file.fileUrl : `${window.location.origin}${file.fileUrl.startsWith("/") ? file.fileUrl : "/" + file.fileUrl}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1"
@@ -588,7 +590,7 @@ export default function B2BOrderDetail() {
                       data-testid={`button-download-upload-${file.id}`}
                     >
                       <a
-                        href={file.fileUrl}
+                        href={file.fileUrl.startsWith("http") ? file.fileUrl : `${window.location.origin}${file.fileUrl.startsWith("/") ? file.fileUrl : "/" + file.fileUrl}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         download={file.fileName}
@@ -602,9 +604,11 @@ export default function B2BOrderDetail() {
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          ) : (
+            <p className="text-sm text-muted-foreground py-4">No uploads for this order yet.</p>
+          )}
+        </CardContent>
+      </Card>
 
       {order.items && order.items.length > 0 && (
         <Card>
