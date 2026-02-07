@@ -562,18 +562,43 @@ export default function B2BOrderDetail() {
           <CardContent>
             <div className="space-y-3">
               {order.artwork.map((file: { id: string; fileName: string; fileUrl: string; fileType?: string }) => (
-                <div key={file.id} className="flex items-center justify-between p-3 border rounded-lg">
-                  <span className="text-sm font-medium truncate flex-1 mr-2">{file.fileName}</span>
-                  <a
-                    href={file.fileUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    download={file.fileName}
-                    className="inline-flex items-center gap-1 text-sm text-primary hover:underline shrink-0"
-                  >
-                    <Download className="h-4 w-4" />
-                    Download
-                  </a>
+                <div key={file.id} className="flex items-center justify-between p-3 border rounded-lg gap-2">
+                  <span className="text-sm font-medium truncate flex-1 min-w-0">{file.fileName}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      asChild
+                      data-testid={`button-view-upload-${file.id}`}
+                    >
+                      <a
+                        href={file.fileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        View
+                      </a>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      asChild
+                      data-testid={`button-download-upload-${file.id}`}
+                    >
+                      <a
+                        href={file.fileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        download={file.fileName}
+                        className="inline-flex items-center gap-1"
+                      >
+                        <Download className="h-4 w-4" />
+                        Download
+                      </a>
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>

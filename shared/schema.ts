@@ -932,6 +932,7 @@ export type B2BClientWithOrders = B2BClient & {
 
 export type B2BOrderWithDetails = B2BOrder & {
   client: B2BClient;
+  printingType?: B2BPrintingType | null;
   items: B2BOrderItem[];
   artwork: B2BOrderArtwork[];
   statusHistory: B2BOrderStatusHistory[];
@@ -939,6 +940,7 @@ export type B2BOrderWithDetails = B2BOrder & {
   payments: B2BPayment[];
   milestones: B2BPaymentMilestone[];
   courierPartner?: CourierPartner | null;
+  createdByUser?: User | null;
 };
 
 // All available permissions in the system

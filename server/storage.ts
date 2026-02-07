@@ -1534,6 +1534,7 @@ class DatabaseStorage implements IStorage {
         where: conditions.length > 0 ? and(...conditions) : undefined,
         with: {
           client: true,
+          createdByUser: true,
           items: true,
           artwork: true,
           statusHistory: true,
@@ -1558,6 +1559,7 @@ class DatabaseStorage implements IStorage {
         with: {
           client: true,
           printingType: true,
+          createdByUser: true,
           items: { with: { product: true } },
           artwork: true,
           statusHistory: true,
@@ -1581,6 +1583,7 @@ class DatabaseStorage implements IStorage {
         with: {
           client: true,
           printingType: true,
+          createdByUser: true,
           items: { with: { product: true } },
           artwork: true,
           statusHistory: true,
@@ -1599,8 +1602,21 @@ class DatabaseStorage implements IStorage {
 
   async createB2BOrder(order: InsertB2BOrder, items: InsertB2BOrderItem[]): Promise<B2BOrderWithDetails> {
     const orderId = randomUUID();
-    const orderNumber = `B2B-${Date.now().toString(36).toUpperCase()}`;
-    
+    const year = new Date().getFullYear();
+    const prefix = `B2B-${year}-`;
+    const existing = await db
+      .select({ orderNumber: b2bOrders.orderNumber })
+      .from(b2bOrders)
+      .where(like(b2bOrders.orderNumber, `${prefix}%`))
+      .orderBy(desc(b2bOrders.orderNumber))
+      .limit(1);
+    let seq = 1;
+    if (existing[0]?.orderNumber) {
+      const match = existing[0].orderNumber.match(new RegExp(`^${prefix.replace(/-/g, "\\-")}(\\d+)$`));
+      if (match) seq = parseInt(match[1], 10) + 1;
+    }
+    const orderNumber = `${prefix}${String(seq).padStart(4, "0")}`;
+
     await db.insert(b2bOrders).values({ 
       ...order, 
       id: orderId, 

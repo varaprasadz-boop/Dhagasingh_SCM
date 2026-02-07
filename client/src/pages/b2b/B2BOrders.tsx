@@ -106,6 +106,7 @@ export default function B2BOrders() {
   const canEdit = isSuperAdmin || hasPermission("edit_b2b_orders");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [agentFilter, setAgentFilter] = useState<string>("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
@@ -196,12 +197,24 @@ export default function B2BOrders() {
       order.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
       order.client?.companyName?.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === "all" || order.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesAgent = agentFilter === "all" || order.createdBy === agentFilter;
+    return matchesSearch && matchesStatus && matchesAgent;
   });
+
+  const agentOptions = Array.from(
+    new Map(
+      (orders ?? [])
+        .filter((o) => (o as B2BOrderWithDetails & { createdByUser?: { id: string; name: string } }).createdByUser)
+        .map((o) => {
+          const u = (o as B2BOrderWithDetails & { createdByUser?: { id: string; name: string } }).createdByUser!;
+          return [u.id, u.name] as const;
+        })
+    ).entries()
+  ).map(([id, name]) => ({ id, name }));
 
   useEffect(() => {
     setDisplayCount(ITEMS_PER_PAGE);
-  }, [search, statusFilter]);
+  }, [search, statusFilter, agentFilter]);
 
   const formatCurrency = (amount: string | number) => {
     const num = typeof amount === "string" ? parseFloat(amount) : amount;
@@ -489,7 +502,7 @@ export default function B2BOrders() {
         </DialogContent>
       </Dialog>
 
-      <div className="flex flex-col sm:flex-row gap-4">
+      <div className="flex flex-col sm:flex-row gap-4 flex-wrap">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -509,6 +522,19 @@ export default function B2BOrders() {
             {Object.entries(statusLabels).map(([value, label]) => (
               <SelectItem key={value} value={value}>
                 {label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={agentFilter} onValueChange={setAgentFilter}>
+          <SelectTrigger className="w-[200px]" data-testid="select-agent-filter">
+            <SelectValue placeholder="Filter by agent" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Agents</SelectItem>
+            {agentOptions.map((agent) => (
+              <SelectItem key={agent.id} value={agent.id}>
+                {agent.name}
               </SelectItem>
             ))}
           </SelectContent>

@@ -24,13 +24,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Package, Eye, Loader2, Trash2, Upload, Pencil } from "lucide-react";
+import { Plus, Package, Eye, Loader2, Trash2, Upload, Pencil, PlusCircle, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ProductImportModal } from "@/components/ProductImportModal";
 import type { ProductWithVariants, ProductVariant } from "@shared/schema";
 import type { UseMutationResult } from "@tanstack/react-query";
+
+type VariantRow = {
+  id: string;
+  sku: string;
+  color: string;
+  size: string;
+  stockQuantity: number;
+  costPrice: string;
+  sellingPrice: string;
+  isNew?: boolean;
+};
 
 function EditProductDialog({
   product,
@@ -39,6 +50,8 @@ function EditProductDialog({
   onSuccess,
   updateProductMutation,
   updateVariantMutation,
+  addVariantMutation,
+  deleteVariantMutation,
 }: {
   product: ProductWithVariants;
   open: boolean;
@@ -46,12 +59,14 @@ function EditProductDialog({
   onSuccess: () => void;
   updateProductMutation: UseMutationResult<unknown, Error, { id: string; data: { name?: string; description?: string; category?: string; isActive?: boolean } }>;
   updateVariantMutation: UseMutationResult<unknown, Error, { id: string; data: Partial<{ stockQuantity: number; costPrice: string; sellingPrice: string }> }>;
+  addVariantMutation: UseMutationResult<ProductVariant, Error, { productId: string; data: { sku: string; color: string; size: string; stockQuantity: number; costPrice: string; sellingPrice: string } }>;
+  deleteVariantMutation: UseMutationResult<unknown, Error, string>;
 }) {
   const [name, setName] = useState(product.name);
   const [description, setDescription] = useState(product.description ?? "");
   const [category, setCategory] = useState(product.category ?? "");
   const [isActive, setIsActive] = useState((product as ProductWithVariants & { isActive?: boolean }).isActive !== false);
-  const [variants, setVariants] = useState(
+  const [variants, setVariants] = useState<VariantRow[]>(
     product.variants.map((v) => ({
       id: v.id,
       sku: v.sku,
@@ -62,34 +77,73 @@ function EditProductDialog({
       sellingPrice: String(v.sellingPrice ?? "0"),
     }))
   );
+  const [newVariantCount, setNewVariantCount] = useState(0);
+
+  const addNewVariant = () => {
+    const base = product.name.substring(0, 3).toUpperCase();
+    setVariants((prev) => [
+      ...prev,
+      {
+        id: `new-${newVariantCount}`,
+        sku: `${base}-NEW-${newVariantCount}`,
+        color: "",
+        size: "",
+        stockQuantity: 0,
+        costPrice: "0",
+        sellingPrice: "0",
+        isNew: true,
+      },
+    ]);
+    setNewVariantCount((c) => c + 1);
+  };
+
+  const removeVariant = (id: string) => {
+    setVariants((prev) => prev.filter((v) => v.id !== id));
+  };
 
   const handleSave = async () => {
-    updateProductMutation.mutate(
-      { id: product.id, data: { name, description, category, isActive } },
-      {
-        onSuccess: () => {
-          variants.forEach((v) => {
-            const orig = product.variants.find((p) => p.id === v.id);
-            if (!orig) return;
-            const changed =
-              orig.stockQuantity !== v.stockQuantity ||
-              String(orig.costPrice) !== v.costPrice ||
-              String(orig.sellingPrice) !== v.sellingPrice;
-            if (changed) {
-              updateVariantMutation.mutate({
-                id: v.id,
-                data: {
-                  stockQuantity: v.stockQuantity,
-                  costPrice: v.costPrice,
-                  sellingPrice: v.sellingPrice,
-                },
-              });
-            }
-          });
-          onSuccess();
-        },
+    try {
+      await updateProductMutation.mutateAsync({ id: product.id, data: { name, description, category, isActive } });
+      const toDelete = product.variants.filter((orig) => !variants.some((v) => v.id === orig.id)).map((v) => v.id);
+      for (const id of toDelete) {
+        await deleteVariantMutation.mutateAsync(id);
       }
-    );
+      for (const v of variants) {
+        const orig = product.variants.find((p) => p.id === v.id);
+        if (orig) {
+          const changed =
+            orig.stockQuantity !== v.stockQuantity ||
+            String(orig.costPrice) !== v.costPrice ||
+            String(orig.sellingPrice) !== v.sellingPrice;
+          if (changed) {
+            await updateVariantMutation.mutateAsync({
+              id: v.id,
+              data: {
+                stockQuantity: v.stockQuantity,
+                costPrice: v.costPrice,
+                sellingPrice: v.sellingPrice,
+              },
+            });
+          }
+        } else if (v.isNew && v.color && v.size) {
+          const sku = `${name.substring(0, 3).toUpperCase()}-${(v.color || "").substring(0, 3).toUpperCase()}-${v.size}`;
+          await addVariantMutation.mutateAsync({
+            productId: product.id,
+            data: {
+              sku,
+              color: v.color,
+              size: v.size,
+              stockQuantity: v.stockQuantity,
+              costPrice: v.costPrice,
+              sellingPrice: v.sellingPrice,
+            },
+          });
+        }
+      }
+      onSuccess();
+    } catch {
+      // Toasts are handled by mutation onError
+    }
   };
 
   return (
@@ -120,11 +174,63 @@ function EditProductDialog({
             <Switch checked={isActive} onCheckedChange={setIsActive} data-testid="edit-product-active" />
           </div>
           <div>
-            <Label className="mb-2 block">Variants</Label>
+            <div className="flex items-center justify-between mb-2">
+              <Label className="block">Variants (colors / sizes)</Label>
+              <Button type="button" variant="outline" size="sm" onClick={addNewVariant} data-testid="button-add-variant">
+                <PlusCircle className="h-4 w-4 mr-1" />
+                Add variant
+              </Button>
+            </div>
             <div className="space-y-3 max-h-[300px] overflow-y-auto">
               {variants.map((v, i) => (
                 <div key={v.id} className="p-3 border rounded-lg space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">{v.sku} {v.color && `• ${v.color}`} {v.size && `• ${v.size}`}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {v.isNew ? "New variant" : v.sku} {v.color && `• ${v.color}`} {v.size && `• ${v.size}`}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 text-destructive hover:text-destructive"
+                      onClick={() => removeVariant(v.id)}
+                      data-testid={`button-remove-variant-${v.id}`}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {v.isNew && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-xs">Color</Label>
+                        <Input
+                          value={v.color}
+                          onChange={(e) =>
+                            setVariants((prev) => {
+                              const next = [...prev];
+                              next[i] = { ...next[i], color: e.target.value };
+                              return next;
+                            })
+                          }
+                          placeholder="e.g. Red"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Size</Label>
+                        <Input
+                          value={v.size}
+                          onChange={(e) =>
+                            setVariants((prev) => {
+                              const next = [...prev];
+                              next[i] = { ...next[i], size: e.target.value };
+                              return next;
+                            })
+                          }
+                          placeholder="e.g. M"
+                        />
+                      </div>
+                    </div>
+                  )}
                   <div className="grid grid-cols-3 gap-2">
                     <div>
                       <Label className="text-xs">Stock</Label>
@@ -296,6 +402,32 @@ export default function Products() {
     },
   });
 
+  const addVariantMutation = useMutation({
+    mutationFn: ({
+      productId,
+      data,
+    }: {
+      productId: string;
+      data: { sku: string; color: string; size: string; stockQuantity: number; costPrice: string; sellingPrice: string };
+    }) => apiRequest("POST", `/api/products/${productId}/variants`, data).then((r) => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to add variant", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteVariantMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/variants/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to delete variant", description: error.message, variant: "destructive" });
+    },
+  });
+
   const filteredProducts = products.filter(
     (p) =>
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -354,19 +486,34 @@ export default function Products() {
       key: "actions",
       header: "",
       render: (p: ProductWithVariants) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            setSelectedProduct(p);
-            setDetailsOpen(true);
-          }}
-          data-testid={`button-view-product-${p.id}`}
-        >
-          <Eye className="h-4 w-4 mr-1" />
-          View
-        </Button>
+        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="View"
+            onClick={() => {
+              setSelectedProduct(p);
+              setDetailsOpen(true);
+            }}
+            data-testid={`button-view-product-${p.id}`}
+          >
+            <Eye className="h-4 w-4" />
+          </Button>
+          {canEdit && (
+            <Button
+              variant="ghost"
+              size="icon"
+              title="Edit"
+              onClick={() => {
+                setEditingProduct(p);
+                setEditDialogOpen(true);
+              }}
+              data-testid={`button-edit-product-${p.id}`}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       ),
     },
   ];
@@ -689,6 +836,8 @@ export default function Products() {
           }}
           updateProductMutation={updateProductMutation}
           updateVariantMutation={updateVariantMutation}
+          addVariantMutation={addVariantMutation}
+          deleteVariantMutation={deleteVariantMutation}
         />
       )}
 

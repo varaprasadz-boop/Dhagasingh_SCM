@@ -2075,7 +2075,7 @@ export async function registerRoutes(
       if (req.query.clientId) filters.clientId = req.query.clientId as string;
       if (req.query.priority) filters.priority = req.query.priority as string;
       if (req.query.search) filters.search = req.query.search as string;
-      
+
       // Apply ownership filter if user cannot view all data
       if (!canViewAll) {
         filters.createdBy = req.user!.id;
