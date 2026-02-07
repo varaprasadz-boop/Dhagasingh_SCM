@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "./StatusBadge";
-import { MessageSquare, RefreshCw, Ban, DollarSign } from "lucide-react";
+import { MessageSquare, RefreshCw, Ban, IndianRupee } from "lucide-react";
 import type { Complaint } from "@/lib/mockData";
 
 interface ComplaintCardProps {
@@ -73,7 +73,7 @@ export function ComplaintCard({ complaint, onResolve }: ComplaintCardProps) {
               onClick={() => onResolve?.(complaint, "refund")}
               data-testid={`button-refund-${complaint.id}`}
             >
-              <DollarSign className="h-4 w-4 mr-1" />
+              <IndianRupee className="h-4 w-4 mr-1" />
               Refund
             </Button>
             <Button

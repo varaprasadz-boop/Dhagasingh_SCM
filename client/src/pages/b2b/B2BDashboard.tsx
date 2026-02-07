@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Building2, ShoppingCart, DollarSign, Clock, TrendingUp, AlertTriangle, Package } from "lucide-react";
+import { Building2, ShoppingCart, IndianRupee, Clock, TrendingUp, AlertTriangle, Package } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import type { B2BOrder } from "@shared/schema";
@@ -177,7 +177,7 @@ export default function B2BDashboard() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Earnings (delivered)</CardTitle>
-            <DollarSign className="h-4 w-4 text-emerald-500" />
+            <IndianRupee className="h-4 w-4 text-emerald-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-emerald-600" data-testid="stat-earnings-delivered">

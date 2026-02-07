@@ -362,6 +362,9 @@ export default function ReceiveStock() {
 
                         {productData && productData.variants.length > 0 && (
                           <div className="space-y-3">
+                            <p className="text-xs text-muted-foreground bg-muted/50 p-2 rounded">
+                              Add each color+size as a <strong>separate variant</strong> in Products (e.g. Maroon / S, Maroon / M, Maroon / L) for correct stock tracking. One row per variant here.
+                            </p>
                             <div className="flex items-center justify-between">
                               <Label className="text-sm">Variants (Color / Size)</Label>
                               <span className="text-xs text-muted-foreground">

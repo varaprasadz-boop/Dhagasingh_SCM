@@ -8,7 +8,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
 import { format } from "date-fns";
-import { ArrowLeft, Plus, Trash2, Upload, X, Package, DollarSign, FileText, Eye, Loader2, ImageIcon, CheckCircle, ChevronsUpDown, Check } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Upload, X, Package, IndianRupee, FileText, Eye, Loader2, ImageIcon, CheckCircle, ChevronsUpDown, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -700,7 +700,7 @@ export default function B2BOrderCreate() {
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <DollarSign className="h-5 w-5" />
+                      <IndianRupee className="h-5 w-5" />
                       Finance Details
                     </CardTitle>
                     <CardDescription>Enter total amount and advance payment details</CardDescription>

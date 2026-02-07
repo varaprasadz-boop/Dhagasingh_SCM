@@ -28,7 +28,7 @@ import {
   ArrowLeft,
   Building2,
   Calendar,
-  DollarSign,
+  IndianRupee,
   RefreshCw,
   FileText,
   CreditCard,
@@ -496,7 +496,7 @@ export default function B2BOrderDetail() {
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
-              <DollarSign className="h-5 w-5" />
+              <IndianRupee className="h-5 w-5" />
               Payment Summary
             </CardTitle>
           </CardHeader>

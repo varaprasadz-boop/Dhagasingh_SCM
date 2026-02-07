@@ -142,8 +142,6 @@ export default function Settings() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="INR">Indian Rupee (₹)</SelectItem>
-                      <SelectItem value="USD">US Dollar ($)</SelectItem>
-                      <SelectItem value="EUR">Euro (€)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

@@ -34,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Search, ShoppingCart, Calendar, User, DollarSign, Eye, ChevronDown, RefreshCw, Pencil } from "lucide-react";
+import { Plus, Search, ShoppingCart, Calendar, User, IndianRupee, Eye, ChevronDown, RefreshCw, Pencil } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
@@ -569,7 +569,7 @@ export default function B2BOrders() {
                         <span>{order.client?.companyName || "Unknown Client"}</span>
                       </div>
                       <div className="flex items-center gap-1">
-                        <DollarSign className="h-4 w-4" />
+                        <IndianRupee className="h-4 w-4" />
                         <span>{formatCurrency(order.totalAmount)}</span>
                       </div>
                       <div className="flex items-center gap-1">

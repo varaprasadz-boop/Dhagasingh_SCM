@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { 
   Users, 
   ShoppingCart, 
-  DollarSign, 
+  IndianRupee, 
   Clock, 
   Plus, 
   FileText, 

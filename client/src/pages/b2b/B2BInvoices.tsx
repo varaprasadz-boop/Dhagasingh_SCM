@@ -32,7 +32,7 @@ import {
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Search, FileText, Calendar, DollarSign, Eye, ChevronDown } from "lucide-react";
+import { Plus, Search, FileText, Calendar, IndianRupee, Eye, ChevronDown } from "lucide-react";
 import { format } from "date-fns";
 import type { B2BInvoice, B2BOrderWithDetails, B2BClient } from "@shared/schema";
 
