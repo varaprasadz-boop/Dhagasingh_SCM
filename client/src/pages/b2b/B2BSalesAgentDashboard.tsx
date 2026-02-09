@@ -173,52 +173,65 @@ export default function B2BSalesAgentDashboard() {
         </Link>
       </div>
 
-      <div className="flex flex-wrap items-end gap-4">
-        <Button
-          variant={viewMode === "today" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setViewMode("today")}
-        >
-          Today
-        </Button>
-        <Button
-          variant={viewMode === "all" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setViewMode("all")}
-        >
-          All
-        </Button>
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="space-y-1">
-            <Label htmlFor="sales-from-date" className="text-xs">From</Label>
-            <Input
-              id="sales-from-date"
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="w-[140px]"
-            />
+      <Card>
+        <CardContent className="pt-6">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+            <div className="md:col-span-3 space-y-2">
+              <Label className="text-sm font-medium text-muted-foreground">Period</Label>
+              <div className="flex gap-2">
+                <Button
+                  variant={viewMode === "today" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setViewMode("today")}
+                  className="flex-1"
+                >
+                  Today
+                </Button>
+                <Button
+                  variant={viewMode === "all" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setViewMode("all")}
+                  className="flex-1"
+                >
+                  All
+                </Button>
+              </div>
+            </div>
+            <div className="md:col-span-6 grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-4 items-end">
+              <div className="space-y-2">
+                <Label htmlFor="sales-from-date" className="text-sm font-medium text-muted-foreground">From</Label>
+                <Input
+                  id="sales-from-date"
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="w-full"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sales-to-date" className="text-sm font-medium text-muted-foreground">To</Label>
+                <Input
+                  id="sales-to-date"
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="w-full"
+                />
+              </div>
+              <Button
+                variant={viewMode === "range" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setViewMode("range")}
+                className="h-10 shrink-0"
+              >
+                <Calendar className="h-4 w-4 mr-2" />
+                Apply range
+              </Button>
+            </div>
+            <div className="md:col-span-3" />
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="sales-to-date" className="text-xs">To</Label>
-            <Input
-              id="sales-to-date"
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="w-[140px]"
-            />
-          </div>
-          <Button
-            variant={viewMode === "range" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setViewMode("range")}
-          >
-            <Calendar className="h-4 w-4 mr-1" />
-            Apply range
-          </Button>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
       {/* Performance Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

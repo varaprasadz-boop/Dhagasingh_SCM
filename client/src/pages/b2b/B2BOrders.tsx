@@ -272,12 +272,12 @@ export default function B2BOrders() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold">B2B Orders</h1>
           <p className="text-muted-foreground">Corporate printing and customization orders</p>
         </div>
-
         <Link href="/b2b/orders/new">
           <Button data-testid="button-new-order">
             <Plus className="h-4 w-4 mr-2" />
@@ -286,71 +286,84 @@ export default function B2BOrders() {
         </Link>
       </div>
 
-      <div className="flex flex-wrap items-end gap-4" data-testid="orders-period-metrics">
-        <Button
-          variant={periodView === "today" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setPeriodView("today")}
-          data-testid="orders-button-today"
-        >
-          Today
-        </Button>
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="space-y-1">
-            <Label htmlFor="orders-from-date" className="text-xs">From</Label>
-            <Input
-              id="orders-from-date"
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="w-[140px]"
-              data-testid="orders-input-from"
-            />
+      {/* Period filter + summary — one card, grid */}
+      <Card data-testid="orders-period-metrics">
+        <CardContent className="pt-6">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-end">
+            <div className="md:col-span-3 space-y-2">
+              <Label className="text-sm font-medium text-muted-foreground">Period</Label>
+              <Button
+                variant={periodView === "today" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setPeriodView("today")}
+                data-testid="orders-button-today"
+                className="w-full"
+              >
+                Today
+              </Button>
+            </div>
+            <div className="md:col-span-5 grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-4 items-end">
+              <div className="space-y-2">
+                <Label htmlFor="orders-from-date" className="text-sm font-medium text-muted-foreground">From</Label>
+                <Input
+                  id="orders-from-date"
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="w-full"
+                  data-testid="orders-input-from"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="orders-to-date" className="text-sm font-medium text-muted-foreground">To</Label>
+                <Input
+                  id="orders-to-date"
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="w-full"
+                  data-testid="orders-input-to"
+                />
+              </div>
+              <Button
+                variant={periodView === "range" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setPeriodView("range")}
+                data-testid="orders-button-apply-range"
+                className="h-10 shrink-0"
+              >
+                <Calendar className="h-4 w-4 mr-2" />
+                Apply range
+              </Button>
+            </div>
+            {(dashboardStats?.byPeriod?.today || dashboardStats?.customRange) && (
+              <div className="md:col-span-4">
+                <Card className="border-dashed bg-muted/30">
+                  <CardContent className="p-4">
+                    <p className="text-sm font-medium text-muted-foreground">
+                      {periodView === "today" ? "Today" : "Selected range"}
+                    </p>
+                    <p className="text-2xl font-bold mt-1">
+                      {periodView === "today"
+                        ? dashboardStats.byPeriod!.today.orderCount
+                        : dashboardStats.customRange!.orderCount}{" "}
+                      <span className="text-sm font-normal text-muted-foreground">orders</span>
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-0.5">
+                      {formatCurrency(
+                        periodView === "today"
+                          ? dashboardStats.byPeriod!.today.revenue
+                          : dashboardStats.customRange!.revenue
+                      )}{" "}
+                      revenue
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="orders-to-date" className="text-xs">To</Label>
-            <Input
-              id="orders-to-date"
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="w-[140px]"
-              data-testid="orders-input-to"
-            />
-          </div>
-          <Button
-            variant={periodView === "range" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setPeriodView("range")}
-            data-testid="orders-button-apply-range"
-          >
-            <Calendar className="h-4 w-4 mr-1" />
-            Apply range
-          </Button>
-        </div>
-        {(dashboardStats?.byPeriod?.today || dashboardStats?.customRange) && (
-          <Card className="min-w-[200px]">
-            <CardContent className="p-4">
-              <p className="text-sm font-medium text-muted-foreground">
-                {periodView === "today" ? "Today" : "Selected range"}
-              </p>
-              <p className="text-2xl font-bold">
-                {periodView === "today"
-                  ? dashboardStats.byPeriod!.today.orderCount
-                  : dashboardStats.customRange!.orderCount}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {formatCurrency(
-                  periodView === "today"
-                    ? dashboardStats.byPeriod!.today.revenue
-                    : dashboardStats.customRange!.revenue
-                )}{" "}
-                revenue
-              </p>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+        </CardContent>
+      </Card>
 
       {viewPending && (
         <div className="rounded-lg border bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 px-4 py-2 text-sm" data-testid="banner-pending-view">
@@ -606,44 +619,57 @@ export default function B2BOrders() {
         </DialogContent>
       </Dialog>
 
-      <div className="flex flex-col sm:flex-row gap-4 flex-wrap">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search orders..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10"
-            data-testid="input-search"
-          />
-        </div>
-        <Select value={agentFilter} onValueChange={setAgentFilter}>
-          <SelectTrigger className="w-[200px]" data-testid="select-agent-filter">
-            <SelectValue placeholder="All agents" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Agents</SelectItem>
-            {agentOptions.map((agent) => (
-              <SelectItem key={agent.id} value={agent.id}>
-                {agent.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[200px]" data-testid="select-status-filter">
-            <SelectValue placeholder="Show all statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            {Object.entries(statusLabels).map(([value, label]) => (
-              <SelectItem key={value} value={value}>
-                {label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <Card>
+        <CardContent className="pt-6">
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-end">
+            <div className="sm:col-span-12 md:col-span-6 lg:col-span-5">
+              <Label className="text-sm font-medium text-muted-foreground mb-2 block">Search</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search orders..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-10 w-full"
+                  data-testid="input-search"
+                />
+              </div>
+            </div>
+            <div className="sm:col-span-6 md:col-span-3">
+              <Label className="text-sm font-medium text-muted-foreground mb-2 block">Agent</Label>
+              <Select value={agentFilter} onValueChange={setAgentFilter}>
+                <SelectTrigger className="w-full" data-testid="select-agent-filter">
+                  <SelectValue placeholder="All agents" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Agents</SelectItem>
+                  {agentOptions.map((agent) => (
+                    <SelectItem key={agent.id} value={agent.id}>
+                      {agent.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="sm:col-span-6 md:col-span-3">
+              <Label className="text-sm font-medium text-muted-foreground mb-2 block">Status</Label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-full" data-testid="select-status-filter">
+                  <SelectValue placeholder="Show all statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  {Object.entries(statusLabels).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {filteredOrders && filteredOrders.length > 0 ? (
         <div className="space-y-4">

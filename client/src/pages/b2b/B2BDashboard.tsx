@@ -122,6 +122,7 @@ export default function B2BDashboard() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold">B2B Dashboard</h1>
@@ -143,59 +144,74 @@ export default function B2BDashboard() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-end gap-4" data-testid="dashboard-date-controls">
-        <Button
-          variant={viewMode === "today" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setViewMode("today")}
-          data-testid="button-today"
-        >
-          Today
-        </Button>
-        <Button
-          variant={viewMode === "all" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setViewMode("all")}
-          data-testid="button-all"
-        >
-          All
-        </Button>
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="space-y-1">
-            <Label htmlFor="b2b-from-date" className="text-xs">From</Label>
-            <Input
-              id="b2b-from-date"
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="w-[140px]"
-              data-testid="input-from-date"
-            />
+      {/* Date range filter — single card, grid layout */}
+      <Card data-testid="dashboard-date-controls">
+        <CardContent className="pt-6">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+            <div className="md:col-span-3 space-y-2">
+              <Label className="text-sm font-medium text-muted-foreground">Period</Label>
+              <div className="flex gap-2">
+                <Button
+                  variant={viewMode === "today" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setViewMode("today")}
+                  data-testid="button-today"
+                  className="flex-1"
+                >
+                  Today
+                </Button>
+                <Button
+                  variant={viewMode === "all" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setViewMode("all")}
+                  data-testid="button-all"
+                  className="flex-1"
+                >
+                  All
+                </Button>
+              </div>
+            </div>
+            <div className="md:col-span-6 grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-4 items-end">
+              <div className="space-y-2">
+                <Label htmlFor="b2b-from-date" className="text-sm font-medium text-muted-foreground">From</Label>
+                <Input
+                  id="b2b-from-date"
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="w-full"
+                  data-testid="input-from-date"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="b2b-to-date" className="text-sm font-medium text-muted-foreground">To</Label>
+                <Input
+                  id="b2b-to-date"
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="w-full"
+                  data-testid="input-to-date"
+                />
+              </div>
+              <Button
+                variant={viewMode === "range" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setViewMode("range")}
+                data-testid="button-apply-range"
+                className="h-10 shrink-0"
+              >
+                <Calendar className="h-4 w-4 mr-2" />
+                Apply range
+              </Button>
+            </div>
+            <div className="md:col-span-3" />
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="b2b-to-date" className="text-xs">To</Label>
-            <Input
-              id="b2b-to-date"
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="w-[140px]"
-              data-testid="input-to-date"
-            />
-          </div>
-          <Button
-            variant={viewMode === "range" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setViewMode("range")}
-            data-testid="button-apply-range"
-          >
-            <Calendar className="h-4 w-4 mr-1" />
-            Apply range
-          </Button>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* KPI cards — strict grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Clients</CardTitle>
@@ -243,8 +259,8 @@ export default function B2BDashboard() {
           </CardContent>
         </Card>
 
-        <Link href="/b2b/orders?view=pending">
-          <Card className="cursor-pointer transition-colors hover:bg-muted/50 h-full" data-testid="card-amount-pending">
+        <Link href="/b2b/orders?view=pending" className="block h-full">
+          <Card className="cursor-pointer transition-colors hover:bg-muted/50 h-full flex flex-col" data-testid="card-amount-pending">
             <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Amount Pending</CardTitle>
               <Clock className="h-4 w-4 text-amber-500" />
