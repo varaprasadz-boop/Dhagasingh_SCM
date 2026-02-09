@@ -4,8 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   Users,
   ShoppingCart,
@@ -199,23 +199,21 @@ export default function B2BSalesAgentDashboard() {
             </div>
             <div className="md:col-span-6 grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-4 items-end">
               <div className="space-y-2">
-                <Label htmlFor="sales-from-date" className="text-sm font-medium text-muted-foreground">From</Label>
-                <Input
+                <Label className="text-sm font-medium text-muted-foreground">From</Label>
+                <DatePicker
                   id="sales-from-date"
-                  type="date"
                   value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                  className="w-full"
+                  onChange={setFromDate}
+                  placeholder="From date"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="sales-to-date" className="text-sm font-medium text-muted-foreground">To</Label>
-                <Input
+                <Label className="text-sm font-medium text-muted-foreground">To</Label>
+                <DatePicker
                   id="sales-to-date"
-                  type="date"
                   value={toDate}
-                  onChange={(e) => setToDate(e.target.value)}
-                  className="w-full"
+                  onChange={setToDate}
+                  placeholder="To date"
                 />
               </div>
               <Button

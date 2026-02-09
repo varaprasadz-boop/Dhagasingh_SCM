@@ -30,6 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Textarea } from "@/components/ui/textarea";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -304,24 +305,22 @@ export default function B2BOrders() {
             </div>
             <div className="md:col-span-5 grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-4 items-end">
               <div className="space-y-2">
-                <Label htmlFor="orders-from-date" className="text-sm font-medium text-muted-foreground">From</Label>
-                <Input
+                <Label className="text-sm font-medium text-muted-foreground">From</Label>
+                <DatePicker
                   id="orders-from-date"
-                  type="date"
                   value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                  className="w-full"
+                  onChange={setFromDate}
+                  placeholder="From date"
                   data-testid="orders-input-from"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="orders-to-date" className="text-sm font-medium text-muted-foreground">To</Label>
-                <Input
+                <Label className="text-sm font-medium text-muted-foreground">To</Label>
+                <DatePicker
                   id="orders-to-date"
-                  type="date"
                   value={toDate}
-                  onChange={(e) => setToDate(e.target.value)}
-                  className="w-full"
+                  onChange={setToDate}
+                  placeholder="To date"
                   data-testid="orders-input-to"
                 />
               </div>

@@ -6,8 +6,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Building2, ShoppingCart, IndianRupee, Clock, TrendingUp, Package, Calendar } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
 import type { B2BOrder } from "@shared/schema";
 import { useAuth } from "@/contexts/AuthContext";
 import B2BSalesAgentDashboard from "./B2BSalesAgentDashboard";
@@ -173,24 +173,22 @@ export default function B2BDashboard() {
             </div>
             <div className="md:col-span-6 grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-4 items-end">
               <div className="space-y-2">
-                <Label htmlFor="b2b-from-date" className="text-sm font-medium text-muted-foreground">From</Label>
-                <Input
+                <Label className="text-sm font-medium text-muted-foreground">From</Label>
+                <DatePicker
                   id="b2b-from-date"
-                  type="date"
                   value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                  className="w-full"
+                  onChange={setFromDate}
+                  placeholder="From date"
                   data-testid="input-from-date"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="b2b-to-date" className="text-sm font-medium text-muted-foreground">To</Label>
-                <Input
+                <Label className="text-sm font-medium text-muted-foreground">To</Label>
+                <DatePicker
                   id="b2b-to-date"
-                  type="date"
                   value={toDate}
-                  onChange={(e) => setToDate(e.target.value)}
-                  className="w-full"
+                  onChange={setToDate}
+                  placeholder="To date"
                   data-testid="input-to-date"
                 />
               </div>
