@@ -2647,7 +2647,17 @@ export async function registerRoutes(
     try {
       const canViewAll = await canViewAllB2BData(req.user!);
       const createdBy = canViewAll ? undefined : req.user!.id;
-      const stats = await storage.getB2BDashboardStats(createdBy);
+      let fromDate: Date | undefined;
+      let toDate: Date | undefined;
+      if (req.query.from && req.query.to) {
+        fromDate = new Date(req.query.from as string);
+        toDate = new Date(req.query.to as string);
+        if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+          fromDate = undefined;
+          toDate = undefined;
+        }
+      }
+      const stats = await storage.getB2BDashboardStats(createdBy, fromDate, toDate);
       res.json(stats);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch dashboard stats" });

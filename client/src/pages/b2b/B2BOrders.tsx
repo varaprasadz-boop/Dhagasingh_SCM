@@ -43,9 +43,15 @@ import type { B2BOrderWithDetails, B2BClient } from "@shared/schema";
 interface DashboardStatsByPeriod {
   byPeriod?: {
     today: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
-    mtd: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
-    last30: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
   };
+  customRange?: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
+}
+
+function formatDateForInput(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 const orderFormSchema = z.object({
@@ -126,12 +132,21 @@ export default function B2BOrders() {
   const [quickStatusComment, setQuickStatusComment] = useState("");
   const { toast } = useToast();
 
+  const [periodView, setPeriodView] = useState<"today" | "range">("today");
+  const todayStr = formatDateForInput(new Date());
+  const [fromDate, setFromDate] = useState(todayStr);
+  const [toDate, setToDate] = useState(todayStr);
+
   const { data: orders, isLoading } = useQuery<B2BOrderWithDetails[]>({
     queryKey: ["/api/b2b/orders"],
   });
 
+  const dashboardUrl =
+    periodView === "range" && fromDate && toDate
+      ? `/api/b2b/dashboard?from=${encodeURIComponent(fromDate)}&to=${encodeURIComponent(toDate)}`
+      : "/api/b2b/dashboard";
   const { data: dashboardStats } = useQuery<DashboardStatsByPeriod>({
-    queryKey: ["/api/b2b/dashboard"],
+    queryKey: [dashboardUrl],
   });
 
   const { data: clients } = useQuery<B2BClient[]>({
@@ -271,37 +286,71 @@ export default function B2BOrders() {
         </Link>
       </div>
 
-      {dashboardStats?.byPeriod && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="orders-period-metrics">
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-sm font-medium text-muted-foreground">Today</p>
-              <p className="text-2xl font-bold">{dashboardStats.byPeriod.today.orderCount}</p>
-              <p className="text-xs text-muted-foreground">
-                {formatCurrency(dashboardStats.byPeriod.today.revenue)} revenue
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-sm font-medium text-muted-foreground">Month-to-Date</p>
-              <p className="text-2xl font-bold">{dashboardStats.byPeriod.mtd.orderCount}</p>
-              <p className="text-xs text-muted-foreground">
-                {formatCurrency(dashboardStats.byPeriod.mtd.revenue)} revenue
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-sm font-medium text-muted-foreground">Last 30 Days</p>
-              <p className="text-2xl font-bold">{dashboardStats.byPeriod.last30.orderCount}</p>
-              <p className="text-xs text-muted-foreground">
-                {formatCurrency(dashboardStats.byPeriod.last30.revenue)} revenue
-              </p>
-            </CardContent>
-          </Card>
+      <div className="flex flex-wrap items-end gap-4" data-testid="orders-period-metrics">
+        <Button
+          variant={periodView === "today" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setPeriodView("today")}
+          data-testid="orders-button-today"
+        >
+          Today
+        </Button>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1">
+            <Label htmlFor="orders-from-date" className="text-xs">From</Label>
+            <Input
+              id="orders-from-date"
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="w-[140px]"
+              data-testid="orders-input-from"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="orders-to-date" className="text-xs">To</Label>
+            <Input
+              id="orders-to-date"
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="w-[140px]"
+              data-testid="orders-input-to"
+            />
+          </div>
+          <Button
+            variant={periodView === "range" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setPeriodView("range")}
+            data-testid="orders-button-apply-range"
+          >
+            <Calendar className="h-4 w-4 mr-1" />
+            Apply range
+          </Button>
         </div>
-      )}
+        {(dashboardStats?.byPeriod?.today || dashboardStats?.customRange) && (
+          <Card className="min-w-[200px]">
+            <CardContent className="p-4">
+              <p className="text-sm font-medium text-muted-foreground">
+                {periodView === "today" ? "Today" : "Selected range"}
+              </p>
+              <p className="text-2xl font-bold">
+                {periodView === "today"
+                  ? dashboardStats.byPeriod!.today.orderCount
+                  : dashboardStats.customRange!.orderCount}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {formatCurrency(
+                  periodView === "today"
+                    ? dashboardStats.byPeriod!.today.revenue
+                    : dashboardStats.customRange!.revenue
+                )}{" "}
+                revenue
+              </p>
+            </CardContent>
+          </Card>
+        )}
+      </div>
 
       {viewPending && (
         <div className="rounded-lg border bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 px-4 py-2 text-sm" data-testid="banner-pending-view">

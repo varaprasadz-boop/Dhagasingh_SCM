@@ -3,15 +3,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Building2, ShoppingCart, IndianRupee, Clock, TrendingUp, Package } from "lucide-react";
+import { Building2, ShoppingCart, IndianRupee, Clock, TrendingUp, Package, Calendar } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import type { B2BOrder } from "@shared/schema";
 import { useAuth } from "@/contexts/AuthContext";
 import B2BSalesAgentDashboard from "./B2BSalesAgentDashboard";
 
-type PeriodKey = "today" | "mtd" | "last30" | "all";
+type ViewMode = "today" | "range" | "all";
 
 interface PeriodMetrics {
   orderCount: number;
@@ -33,11 +34,8 @@ interface DashboardStats {
   ordersByPaymentStatus: Record<string, number>;
   recentOrders: B2BOrder[];
   overduePayments: { orderId: string; orderNumber: string; amount: number; dueDate: Date }[];
-  byPeriod?: {
-    today: PeriodMetrics;
-    mtd: PeriodMetrics;
-    last30: PeriodMetrics;
-  };
+  byPeriod?: { today: PeriodMetrics };
+  customRange?: PeriodMetrics;
 }
 
 const statusLabels: Record<string, string> = {
@@ -61,21 +59,37 @@ const paymentStatusLabels: Record<string, string> = {
   fully_paid: "Fully Paid",
 };
 
+function formatDateForInput(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export default function B2BDashboard() {
   const { hasPermission, isSuperAdmin } = useAuth();
   const canViewAllB2BData = isSuperAdmin || hasPermission("view_all_b2b_data");
-  const [period, setPeriod] = useState<PeriodKey>("all");
-  
+  const [viewMode, setViewMode] = useState<ViewMode>("all");
+  const todayStr = formatDateForInput(new Date());
+  const [fromDate, setFromDate] = useState(todayStr);
+  const [toDate, setToDate] = useState(todayStr);
+
+  const dashboardUrl =
+    viewMode === "range" && fromDate && toDate
+      ? `/api/b2b/dashboard?from=${encodeURIComponent(fromDate)}&to=${encodeURIComponent(toDate)}`
+      : "/api/b2b/dashboard";
   const { data: stats, isLoading } = useQuery<DashboardStats>({
-    queryKey: ["/api/b2b/dashboard"],
+    queryKey: [dashboardUrl],
   });
-  
+
   const periodMetrics =
-    period !== "all" && stats?.byPeriod
-      ? stats.byPeriod[period]
-      : null;
+    viewMode === "today" && stats?.byPeriod
+      ? stats.byPeriod.today
+      : viewMode === "range"
+        ? stats?.customRange
+        : null;
   const displayOrderCount = periodMetrics?.orderCount ?? stats?.totalOrders ?? 0;
-  const displayActiveOrders = period === "all" ? (stats?.activeOrders ?? 0) : periodMetrics?.orderCount ?? 0;
+  const displayActiveOrders = viewMode === "all" ? (stats?.activeOrders ?? 0) : (periodMetrics?.orderCount ?? 0);
   const displayAmountReceived = periodMetrics?.amountReceived ?? stats?.amountReceived ?? 0;
   const displayAmountPending = periodMetrics?.amountPending ?? stats?.amountPending ?? 0;
   const displayRevenue = periodMetrics?.revenue ?? stats?.totalRevenue ?? 0;
@@ -129,14 +143,57 @@ export default function B2BDashboard() {
         </div>
       </div>
 
-      <Tabs value={period} onValueChange={(v) => setPeriod(v as PeriodKey)} className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-4">
-          <TabsTrigger value="today" data-testid="tab-today">Today</TabsTrigger>
-          <TabsTrigger value="mtd" data-testid="tab-mtd">Month-to-Date</TabsTrigger>
-          <TabsTrigger value="last30" data-testid="tab-last30">Last 30 Days</TabsTrigger>
-          <TabsTrigger value="all" data-testid="tab-all">All</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <div className="flex flex-wrap items-end gap-4" data-testid="dashboard-date-controls">
+        <Button
+          variant={viewMode === "today" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setViewMode("today")}
+          data-testid="button-today"
+        >
+          Today
+        </Button>
+        <Button
+          variant={viewMode === "all" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setViewMode("all")}
+          data-testid="button-all"
+        >
+          All
+        </Button>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1">
+            <Label htmlFor="b2b-from-date" className="text-xs">From</Label>
+            <Input
+              id="b2b-from-date"
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="w-[140px]"
+              data-testid="input-from-date"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="b2b-to-date" className="text-xs">To</Label>
+            <Input
+              id="b2b-to-date"
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="w-[140px]"
+              data-testid="input-to-date"
+            />
+          </div>
+          <Button
+            variant={viewMode === "range" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setViewMode("range")}
+            data-testid="button-apply-range"
+          >
+            <Calendar className="h-4 w-4 mr-1" />
+            Apply range
+          </Button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
@@ -155,7 +212,7 @@ export default function B2BDashboard() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
-              {period === "all" ? "Active Orders" : "Orders"}
+              {viewMode === "all" ? "Active Orders" : "Orders"}
             </CardTitle>
             <ShoppingCart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -164,9 +221,9 @@ export default function B2BDashboard() {
               {displayActiveOrders}
             </div>
             <p className="text-xs text-muted-foreground">
-              {period === "all"
+              {viewMode === "all"
                 ? `of ${stats?.totalOrders || 0} total orders`
-                : `in selected period`}
+                : "in selected period"}
             </p>
           </CardContent>
         </Card>
@@ -181,7 +238,7 @@ export default function B2BDashboard() {
               {formatCurrency(displayAmountReceived)}
             </div>
             <p className="text-xs text-muted-foreground">
-              of {formatCurrency(displayRevenue)} {period === "all" ? "total" : "in period"}
+              of {formatCurrency(displayRevenue)} {viewMode === "all" ? "total" : "in period"}
             </p>
           </CardContent>
         </Card>

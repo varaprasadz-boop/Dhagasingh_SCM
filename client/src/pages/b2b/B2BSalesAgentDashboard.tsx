@@ -4,21 +4,23 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { 
-  Users, 
-  ShoppingCart, 
-  Clock, 
-  Plus, 
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Users,
+  ShoppingCart,
+  Clock,
+  Plus,
   CreditCard,
   AlertTriangle,
   TrendingUp,
-  Building2
+  Building2,
+  Calendar,
 } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 
-type PeriodKey = "today" | "mtd" | "last30" | "all";
+type ViewMode = "today" | "range" | "all";
 
 interface PeriodMetrics {
   orderCount: number;
@@ -45,11 +47,15 @@ interface DashboardStats {
     overduePayments: number;
     pendingInvoices: number;
   };
-  byPeriod?: {
-    today: PeriodMetrics;
-    mtd: PeriodMetrics;
-    last30: PeriodMetrics;
-  };
+  byPeriod?: { today: PeriodMetrics };
+  customRange?: PeriodMetrics;
+}
+
+function formatDateForInput(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
@@ -87,16 +93,28 @@ function formatCurrency(amount: number): string {
 }
 
 export default function B2BSalesAgentDashboard() {
-  const [period, setPeriod] = useState<PeriodKey>("all");
+  const [viewMode, setViewMode] = useState<ViewMode>("all");
+  const todayStr = formatDateForInput(new Date());
+  const [fromDate, setFromDate] = useState(todayStr);
+  const [toDate, setToDate] = useState(todayStr);
+
+  const dashboardUrl =
+    viewMode === "range" && fromDate && toDate
+      ? `/api/b2b/dashboard?from=${encodeURIComponent(fromDate)}&to=${encodeURIComponent(toDate)}`
+      : "/api/b2b/dashboard";
   const { data: stats, isLoading } = useQuery<DashboardStats>({
-    queryKey: ["/api/b2b/dashboard"],
+    queryKey: [dashboardUrl],
   });
 
   const periodMetrics =
-    period !== "all" && stats?.byPeriod ? stats.byPeriod[period] : null;
+    viewMode === "today" && stats?.byPeriod
+      ? stats.byPeriod.today
+      : viewMode === "range"
+        ? stats?.customRange
+        : null;
   const displayOrders = periodMetrics?.orderCount ?? stats?.totalOrders ?? 0;
-  const displayOpenOrders = period === "all" ? (stats?.activeOrders ?? 0) : periodMetrics?.orderCount ?? 0;
-  const displayRevenue = periodMetrics?.revenue ?? (period === "mtd" ? stats?.monthlyRevenue : stats?.totalRevenue) ?? 0;
+  const displayOpenOrders = viewMode === "all" ? (stats?.activeOrders ?? 0) : (periodMetrics?.orderCount ?? 0);
+  const displayRevenue = periodMetrics?.revenue ?? stats?.totalRevenue ?? 0;
   const displayAmountReceived = periodMetrics?.amountReceived ?? stats?.amountReceived ?? 0;
   const displayAmountPending = periodMetrics?.amountPending ?? stats?.amountPending ?? 0;
 
@@ -155,16 +173,52 @@ export default function B2BSalesAgentDashboard() {
         </Link>
       </div>
 
-      {stats?.byPeriod && (
-        <Tabs value={period} onValueChange={(v) => setPeriod(v as PeriodKey)} className="w-full">
-          <TabsList className="grid w-full max-w-md grid-cols-4">
-            <TabsTrigger value="today">Today</TabsTrigger>
-            <TabsTrigger value="mtd">Month-to-Date</TabsTrigger>
-            <TabsTrigger value="last30">Last 30 Days</TabsTrigger>
-            <TabsTrigger value="all">All</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      )}
+      <div className="flex flex-wrap items-end gap-4">
+        <Button
+          variant={viewMode === "today" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setViewMode("today")}
+        >
+          Today
+        </Button>
+        <Button
+          variant={viewMode === "all" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setViewMode("all")}
+        >
+          All
+        </Button>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1">
+            <Label htmlFor="sales-from-date" className="text-xs">From</Label>
+            <Input
+              id="sales-from-date"
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="w-[140px]"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="sales-to-date" className="text-xs">To</Label>
+            <Input
+              id="sales-to-date"
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="w-[140px]"
+            />
+          </div>
+          <Button
+            variant={viewMode === "range" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setViewMode("range")}
+          >
+            <Calendar className="h-4 w-4 mr-1" />
+            Apply range
+          </Button>
+        </div>
+      </div>
 
       {/* Performance Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -181,13 +235,13 @@ export default function B2BSalesAgentDashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2 gap-2">
-            <CardTitle className="text-sm font-medium">{period === "all" ? "Open Orders" : "Orders"}</CardTitle>
+            <CardTitle className="text-sm font-medium">{viewMode === "all" ? "Open Orders" : "Orders"}</CardTitle>
             <ShoppingCart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold" data-testid="text-open-orders">{displayOpenOrders}</div>
             <p className="text-xs text-muted-foreground">
-              {period === "all" ? "Orders in progress" : "In selected period"}
+              {viewMode === "all" ? "Orders in progress" : "In selected period"}
             </p>
           </CardContent>
         </Card>
@@ -195,7 +249,7 @@ export default function B2BSalesAgentDashboard() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2 gap-2">
             <CardTitle className="text-sm font-medium">
-              {period === "mtd" || period === "all" ? "Monthly Revenue" : "Revenue"}
+              {viewMode === "all" ? "Monthly Revenue" : "Revenue"}
             </CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -204,7 +258,7 @@ export default function B2BSalesAgentDashboard() {
               {formatCurrency(displayRevenue)}
             </div>
             <p className="text-xs text-muted-foreground">
-              {period === "all" ? "This month's orders" : "In selected period"}
+              {viewMode === "all" ? "This month's orders" : "In selected period"}
             </p>
           </CardContent>
         </Card>
@@ -396,7 +450,7 @@ export default function B2BSalesAgentDashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              {period === "all" ? "Total Revenue" : "Revenue"}
+              {viewMode === "all" ? "Total Revenue" : "Revenue"}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -414,7 +468,7 @@ export default function B2BSalesAgentDashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              {period === "all" ? "Total Orders" : "Orders"}
+              {viewMode === "all" ? "Total Orders" : "Orders"}
             </CardTitle>
           </CardHeader>
           <CardContent>

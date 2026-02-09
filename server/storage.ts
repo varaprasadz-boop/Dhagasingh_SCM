@@ -192,7 +192,7 @@ export interface IStorage {
   updateB2BPaymentMilestone(id: string, milestone: Partial<InsertB2BPaymentMilestone>): Promise<B2BPaymentMilestone | undefined>;
   
   // B2B Dashboard Stats
-  getB2BDashboardStats(createdBy?: string): Promise<B2BDashboardStats>;
+  getB2BDashboardStats(createdBy?: string, fromDate?: Date, toDate?: Date): Promise<B2BDashboardStats>;
 }
 
 interface OrderFilters {
@@ -302,12 +302,12 @@ export interface B2BDashboardStats {
     pendingInvoices: number;
   };
   overduePayments: { orderId: string; orderNumber: string; amount: number; dueDate: Date }[];
-  /** Metrics by time period (today, month-to-date, last 30 days) */
+  /** Metrics for today only */
   byPeriod: {
     today: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
-    mtd: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
-    last30: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
   };
+  /** Metrics for custom date range when from/to query params provided */
+  customRange?: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
 }
 
 class DatabaseStorage implements IStorage {
@@ -1915,7 +1915,7 @@ class DatabaseStorage implements IStorage {
   }
 
   // B2B Dashboard Stats
-  async getB2BDashboardStats(createdBy?: string): Promise<B2BDashboardStats> {
+  async getB2BDashboardStats(createdBy?: string, fromDate?: Date, toDate?: Date): Promise<B2BDashboardStats> {
     try {
       // Apply ownership filter if createdBy is specified
       const clientConditions = createdBy 
@@ -1942,29 +1942,35 @@ class DatabaseStorage implements IStorage {
       const monthlyOrders = allOrders.filter(o => new Date(o.createdAt) >= startOfMonth);
       const monthlyRevenue = monthlyOrders.reduce((sum, o) => sum + (parseFloat(o.totalAmount as string) || 0), 0);
       
-      // By period: today, mtd, last 30 days
+      // Today only
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const startOfNextDay = new Date(startOfToday);
       startOfNextDay.setDate(startOfNextDay.getDate() + 1);
-      const startOfLast30 = new Date(now);
-      startOfLast30.setDate(startOfLast30.getDate() - 30);
       const ordersToday = allOrders.filter(o => {
         const d = new Date(o.createdAt);
         return d >= startOfToday && d < startOfNextDay;
       });
-      const ordersMtd = allOrders.filter(o => new Date(o.createdAt) >= startOfMonth);
-      const ordersLast30 = allOrders.filter(o => new Date(o.createdAt) >= startOfLast30);
       const aggregate = (orders: typeof allOrders) => ({
         orderCount: orders.length,
         revenue: orders.reduce((s, o) => s + (parseFloat(o.totalAmount as string) || 0), 0),
         amountReceived: orders.reduce((s, o) => s + (parseFloat(o.amountReceived as string) || 0), 0),
         amountPending: orders.reduce((s, o) => s + (parseFloat(o.balancePending as string) || 0), 0),
       });
-      const byPeriod = {
-        today: aggregate(ordersToday),
-        mtd: aggregate(ordersMtd),
-        last30: aggregate(ordersLast30),
-      };
+      const byPeriod = { today: aggregate(ordersToday) };
+
+      // Custom date range when fromDate and toDate provided
+      let customRange: B2BDashboardStats["customRange"];
+      if (fromDate && toDate) {
+        const rangeStart = new Date(fromDate);
+        rangeStart.setHours(0, 0, 0, 0);
+        const rangeEnd = new Date(toDate);
+        rangeEnd.setHours(23, 59, 59, 999);
+        const ordersInRange = allOrders.filter(o => {
+          const d = new Date(o.createdAt);
+          return d >= rangeStart && d <= rangeEnd;
+        });
+        customRange = aggregate(ordersInRange);
+      }
       
       const ordersByStatus: Record<string, number> = {};
       const ordersByPaymentStatus: Record<string, number> = {};
@@ -2065,6 +2071,7 @@ class DatabaseStorage implements IStorage {
         },
         overduePayments: [],
         byPeriod,
+        ...(customRange && { customRange }),
       };
     } catch (error) {
       console.error("Error fetching B2B dashboard stats:", error);
@@ -2088,7 +2095,7 @@ class DatabaseStorage implements IStorage {
           pendingInvoices: 0,
         },
         overduePayments: [],
-        byPeriod: { today: emptyPeriod, mtd: emptyPeriod, last30: emptyPeriod },
+        byPeriod: { today: emptyPeriod },
       };
     }
   }
