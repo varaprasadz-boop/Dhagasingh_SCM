@@ -125,17 +125,23 @@ function EditProductDialog({
               },
             });
           }
-        } else if (v.isNew && v.color && v.size) {
-          const sku = `${name.substring(0, 3).toUpperCase()}-${(v.color || "").substring(0, 3).toUpperCase()}-${v.size}`;
+        } else if (v.isNew) {
+          const color = (v.color ?? "").trim();
+          const size = (v.size ?? "").trim();
+          if (!color || !size) {
+            toast({ title: "Invalid variant", description: "Color and size are required for new variants.", variant: "destructive" });
+            return;
+          }
+          const sku = `${name.substring(0, 3).toUpperCase()}-${color.substring(0, 3).toUpperCase()}-${size}`;
           await addVariantMutation.mutateAsync({
             productId: product.id,
             data: {
               sku,
-              color: v.color,
-              size: v.size,
-              stockQuantity: v.stockQuantity,
-              costPrice: v.costPrice,
-              sellingPrice: v.sellingPrice,
+              color,
+              size,
+              stockQuantity: Number(v.stockQuantity) || 0,
+              costPrice: (v.costPrice != null && String(v.costPrice).trim() !== "") ? String(v.costPrice).trim() : "0",
+              sellingPrice: (v.sellingPrice != null && String(v.sellingPrice).trim() !== "") ? String(v.sellingPrice).trim() : "0",
             },
           });
         }
@@ -414,7 +420,19 @@ export default function Products() {
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
     },
     onError: (error: Error) => {
-      toast({ title: "Failed to add variant", description: error.message, variant: "destructive" });
+      const msg = error.message;
+      const jsonMatch = msg.match(/^\d+\s*:\s*(\{.+\})$/s);
+      const description = jsonMatch
+        ? (() => {
+            try {
+              const o = JSON.parse(jsonMatch[1]);
+              return o.error ?? (o.details?.[0]?.message) ?? msg;
+            } catch {
+              return msg;
+            }
+          })()
+        : msg;
+      toast({ title: "Failed to add variant", description, variant: "destructive" });
     },
   });
 

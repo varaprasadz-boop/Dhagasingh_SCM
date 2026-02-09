@@ -542,14 +542,39 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Product not found" });
       }
 
-      const data = insertProductVariantSchema.parse({ ...req.body, productId: req.params.id });
+      // Normalize so Zod and DB get valid types (empty string -> "0" for decimals, number for stock)
+      const body = req.body as Record<string, unknown>;
+      const normalized = {
+        ...body,
+        productId: req.params.id,
+        sku: typeof body.sku === "string" ? body.sku.trim() : body.sku,
+        color: body.color != null ? String(body.color) : undefined,
+        size: body.size != null ? String(body.size) : undefined,
+        stockQuantity: typeof body.stockQuantity === "number" && !Number.isNaN(body.stockQuantity)
+          ? body.stockQuantity
+          : Number(body.stockQuantity) || 0,
+        costPrice: body.costPrice != null && String(body.costPrice).trim() !== ""
+          ? String(body.costPrice)
+          : "0",
+        sellingPrice: body.sellingPrice != null && String(body.sellingPrice).trim() !== ""
+          ? String(body.sellingPrice)
+          : "0",
+      };
+
+      const data = insertProductVariantSchema.parse(normalized);
       const variant = await storage.createProductVariant(data);
-      
+
       res.status(201).json(variant);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
+        return res.status(400).json({ error: "Validation failed", details: error.errors });
       }
+      // Unique constraint (e.g. duplicate SKU)
+      const err = error as { code?: string; message?: string };
+      if (err.code === "23505" || (err.message && err.message.includes("unique") || err.message?.includes("duplicate"))) {
+        return res.status(409).json({ error: "A variant with this SKU already exists." });
+      }
+      console.error("Create variant error:", error);
       res.status(500).json({ error: "Failed to create variant" });
     }
   });
