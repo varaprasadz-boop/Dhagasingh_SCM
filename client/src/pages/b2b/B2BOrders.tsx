@@ -41,13 +41,6 @@ import { format } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
 import type { B2BOrderWithDetails, B2BClient } from "@shared/schema";
 
-interface DashboardStatsByPeriod {
-  byPeriod?: {
-    today: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
-  };
-  customRange?: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
-}
-
 function formatDateForInput(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -140,14 +133,6 @@ export default function B2BOrders() {
 
   const { data: orders, isLoading } = useQuery<B2BOrderWithDetails[]>({
     queryKey: ["/api/b2b/orders"],
-  });
-
-  const dashboardUrl =
-    periodView === "range" && fromDate && toDate
-      ? `/api/b2b/dashboard?from=${encodeURIComponent(fromDate)}&to=${encodeURIComponent(toDate)}`
-      : "/api/b2b/dashboard";
-  const { data: dashboardStats } = useQuery<DashboardStatsByPeriod>({
-    queryKey: [dashboardUrl],
   });
 
   const { data: clients } = useQuery<B2BClient[]>({
@@ -287,82 +272,74 @@ export default function B2BOrders() {
         </Link>
       </div>
 
-      {/* Period filter + summary — one card, grid */}
-      <Card data-testid="orders-period-metrics">
-        <CardContent className="pt-6">
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-end">
-            <div className="md:col-span-3 space-y-2">
-              <Label className="text-sm font-medium text-muted-foreground">Period</Label>
-              <Button
-                variant={periodView === "today" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setPeriodView("today")}
-                data-testid="orders-button-today"
-                className="w-full"
-              >
-                Today
-              </Button>
+      {/* Date filter bar — matches dashboard */}
+      <div
+        data-testid="orders-period-metrics"
+        className="rounded-lg border border-border/80 bg-muted/30 px-5 py-4"
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Period
+              </span>
+              <div className="flex rounded-md border border-input bg-background p-0.5 shadow-sm">
+                <Button
+                  variant={periodView === "today" ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => setPeriodView("today")}
+                  data-testid="orders-button-today"
+                  className="h-8 rounded border-0 px-3 text-xs font-medium transition-colors"
+                >
+                  Today
+                </Button>
+                <Button
+                  variant={periodView === "range" ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => setPeriodView("range")}
+                  className="h-8 rounded border-0 px-3 text-xs font-medium transition-colors"
+                >
+                  Range
+                </Button>
+              </div>
             </div>
-            <div className="md:col-span-5 grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-4 items-end">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-muted-foreground">From</Label>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground sm:shrink-0">
+                Date range
+              </span>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
                 <DatePicker
                   id="orders-from-date"
                   value={fromDate}
                   onChange={setFromDate}
-                  placeholder="From date"
+                  placeholder="From"
                   data-testid="orders-input-from"
+                  className="h-9 min-w-[140px]"
                 />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-muted-foreground">To</Label>
+                <span className="hidden text-muted-foreground/60 sm:inline" aria-hidden>–</span>
                 <DatePicker
                   id="orders-to-date"
                   value={toDate}
                   onChange={setToDate}
-                  placeholder="To date"
+                  placeholder="To"
                   data-testid="orders-input-to"
+                  className="h-9 min-w-[140px]"
                 />
+                <Button
+                  variant={periodView === "range" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setPeriodView("range")}
+                  data-testid="orders-button-apply-range"
+                  className="h-9 shrink-0 gap-1.5 px-3 text-xs"
+                >
+                  <Calendar className="h-3.5 w-3.5" />
+                  Apply
+                </Button>
               </div>
-              <Button
-                variant={periodView === "range" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setPeriodView("range")}
-                data-testid="orders-button-apply-range"
-                className="h-10 shrink-0"
-              >
-                <Calendar className="h-4 w-4 mr-2" />
-                Apply range
-              </Button>
             </div>
-            {(dashboardStats?.byPeriod?.today || dashboardStats?.customRange) && (
-              <div className="md:col-span-4">
-                <Card className="border-dashed bg-muted/30">
-                  <CardContent className="p-4">
-                    <p className="text-sm font-medium text-muted-foreground">
-                      {periodView === "today" ? "Today" : "Selected range"}
-                    </p>
-                    <p className="text-2xl font-bold mt-1">
-                      {periodView === "today"
-                        ? dashboardStats.byPeriod!.today.orderCount
-                        : dashboardStats.customRange!.orderCount}{" "}
-                      <span className="text-sm font-normal text-muted-foreground">orders</span>
-                    </p>
-                    <p className="text-sm text-muted-foreground mt-0.5">
-                      {formatCurrency(
-                        periodView === "today"
-                          ? dashboardStats.byPeriod!.today.revenue
-                          : dashboardStats.customRange!.revenue
-                      )}{" "}
-                      revenue
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
-            )}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {viewPending && (
         <div className="rounded-lg border bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 px-4 py-2 text-sm" data-testid="banner-pending-view">

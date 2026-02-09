@@ -6,7 +6,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Building2, ShoppingCart, IndianRupee, Clock, TrendingUp, Package, Calendar } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { DatePicker } from "@/components/ui/date-picker";
 import type { B2BOrder } from "@shared/schema";
 import { useAuth } from "@/contexts/AuthContext";
@@ -144,69 +143,75 @@ export default function B2BDashboard() {
         </div>
       </div>
 
-      {/* Date range filter — single card, grid layout */}
-      <Card data-testid="dashboard-date-controls">
-        <CardContent className="pt-6">
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-            <div className="md:col-span-3 space-y-2">
-              <Label className="text-sm font-medium text-muted-foreground">Period</Label>
-              <div className="flex gap-2">
+      {/* Date filter bar — compact, editorial */}
+      <div
+        data-testid="dashboard-date-controls"
+        className="rounded-lg border border-border/80 bg-muted/30 px-5 py-4"
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Period
+              </span>
+              <div className="flex rounded-md border border-input bg-background p-0.5 shadow-sm">
                 <Button
-                  variant={viewMode === "today" ? "default" : "outline"}
+                  variant={viewMode === "today" ? "secondary" : "ghost"}
                   size="sm"
                   onClick={() => setViewMode("today")}
                   data-testid="button-today"
-                  className="flex-1"
+                  className="h-8 rounded border-0 px-3 text-xs font-medium transition-colors"
                 >
                   Today
                 </Button>
                 <Button
-                  variant={viewMode === "all" ? "default" : "outline"}
+                  variant={viewMode === "all" ? "secondary" : "ghost"}
                   size="sm"
                   onClick={() => setViewMode("all")}
                   data-testid="button-all"
-                  className="flex-1"
+                  className="h-8 rounded border-0 px-3 text-xs font-medium transition-colors"
                 >
                   All
                 </Button>
               </div>
             </div>
-            <div className="md:col-span-6 grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-4 items-end">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-muted-foreground">From</Label>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground sm:shrink-0">
+                Range
+              </span>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
                 <DatePicker
                   id="b2b-from-date"
                   value={fromDate}
                   onChange={setFromDate}
-                  placeholder="From date"
+                  placeholder="From"
                   data-testid="input-from-date"
+                  className="h-9 min-w-[140px]"
                 />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-muted-foreground">To</Label>
+                <span className="hidden text-muted-foreground/60 sm:inline" aria-hidden>–</span>
                 <DatePicker
                   id="b2b-to-date"
                   value={toDate}
                   onChange={setToDate}
-                  placeholder="To date"
+                  placeholder="To"
                   data-testid="input-to-date"
+                  className="h-9 min-w-[140px]"
                 />
+                <Button
+                  variant={viewMode === "range" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setViewMode("range")}
+                  data-testid="button-apply-range"
+                  className="h-9 shrink-0 gap-1.5 px-3 text-xs"
+                >
+                  <Calendar className="h-3.5 w-3.5" />
+                  Apply
+                </Button>
               </div>
-              <Button
-                variant={viewMode === "range" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setViewMode("range")}
-                data-testid="button-apply-range"
-                className="h-10 shrink-0"
-              >
-                <Calendar className="h-4 w-4 mr-2" />
-                Apply range
-              </Button>
             </div>
-            <div className="md:col-span-3" />
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* KPI cards — strict grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
