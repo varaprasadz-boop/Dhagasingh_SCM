@@ -1958,13 +1958,11 @@ class DatabaseStorage implements IStorage {
       });
       const byPeriod = { today: aggregate(ordersToday) };
 
-      // Custom date range when fromDate and toDate provided
+      // Custom date range when fromDate and toDate provided (use UTC for consistent comparison with DB timestamps)
       let customRange: B2BDashboardStats["customRange"];
       if (fromDate && toDate) {
-        const rangeStart = new Date(fromDate);
-        rangeStart.setHours(0, 0, 0, 0);
-        const rangeEnd = new Date(toDate);
-        rangeEnd.setHours(23, 59, 59, 999);
+        const rangeStart = new Date(fromDate + "T00:00:00.000Z");
+        const rangeEnd = new Date(toDate + "T23:59:59.999Z");
         const ordersInRange = allOrders.filter(o => {
           const d = new Date(o.createdAt);
           return d >= rangeStart && d <= rangeEnd;

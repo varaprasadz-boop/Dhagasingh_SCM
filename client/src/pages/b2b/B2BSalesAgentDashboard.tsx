@@ -97,12 +97,17 @@ export default function B2BSalesAgentDashboard() {
   const [fromDate, setFromDate] = useState(todayStr);
   const [toDate, setToDate] = useState(todayStr);
 
-  const dashboardUrl =
-    viewMode === "range" && fromDate && toDate
-      ? `/api/b2b/dashboard?from=${encodeURIComponent(fromDate)}&to=${encodeURIComponent(toDate)}`
-      : "/api/b2b/dashboard";
   const { data: stats, isLoading } = useQuery<DashboardStats>({
-    queryKey: [dashboardUrl],
+    queryKey: ["/api/b2b/dashboard", viewMode, fromDate, toDate],
+    queryFn: async () => {
+      const url =
+        viewMode === "range" && fromDate && toDate
+          ? `/api/b2b/dashboard?from=${encodeURIComponent(fromDate)}&to=${encodeURIComponent(toDate)}`
+          : "/api/b2b/dashboard";
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
   });
 
   const periodMetrics =

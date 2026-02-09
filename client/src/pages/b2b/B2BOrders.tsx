@@ -48,6 +48,29 @@ function formatDateForInput(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
+/** True if order createdAt is on the same calendar day as today (local time). */
+function isOrderCreatedToday(createdAt: string | Date): boolean {
+  const d = new Date(createdAt);
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
+
+/** True if order createdAt is between fromStr and toStr (YYYY-MM-DD) inclusive, local date. */
+function isOrderInDateRange(
+  createdAt: string | Date,
+  fromStr: string,
+  toStr: string
+): boolean {
+  const d = new Date(createdAt);
+  const from = new Date(fromStr + "T00:00:00");
+  const to = new Date(toStr + "T23:59:59.999");
+  return d >= from && d <= to;
+}
+
 const orderFormSchema = z.object({
   clientId: z.string().min(1, "Client is required"),
   fabricType: z.string().optional().or(z.literal("")),
@@ -216,7 +239,11 @@ export default function B2BOrders() {
     const matchesAgent = agentFilter === "all" || order.createdBy === agentFilter;
     const matchesPending =
       !viewPending || (parseFloat(String(order.balancePending ?? 0)) > 0);
-    return matchesSearch && matchesStatus && matchesAgent && matchesPending;
+    const matchesDate =
+      periodView === "today"
+        ? isOrderCreatedToday(order.createdAt)
+        : isOrderInDateRange(order.createdAt, fromDate, toDate);
+    return matchesSearch && matchesStatus && matchesAgent && matchesPending && matchesDate;
   });
 
   const agentOptions = Array.from(
@@ -232,7 +259,7 @@ export default function B2BOrders() {
 
   useEffect(() => {
     setDisplayCount(ITEMS_PER_PAGE);
-  }, [search, statusFilter, agentFilter, viewPending]);
+  }, [search, statusFilter, agentFilter, viewPending, periodView, fromDate, toDate]);
 
   const formatCurrency = (amount: string | number) => {
     const num = typeof amount === "string" ? parseFloat(amount) : amount;
