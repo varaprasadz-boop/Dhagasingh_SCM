@@ -302,6 +302,12 @@ export interface B2BDashboardStats {
     pendingInvoices: number;
   };
   overduePayments: { orderId: string; orderNumber: string; amount: number; dueDate: Date }[];
+  /** Metrics by time period (today, month-to-date, last 30 days) */
+  byPeriod: {
+    today: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
+    mtd: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
+    last30: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
+  };
 }
 
 class DatabaseStorage implements IStorage {
@@ -1683,6 +1689,9 @@ class DatabaseStorage implements IStorage {
   }
 
   async deleteB2BOrder(id: string): Promise<boolean> {
+    // Payments reference invoices; invoices reference order without cascade. Delete in order:
+    await db.delete(b2bPayments).where(eq(b2bPayments.orderId, id));
+    await db.delete(b2bInvoices).where(eq(b2bInvoices.orderId, id));
     await db.delete(b2bOrders).where(eq(b2bOrders.id, id));
     return true;
   }
@@ -1933,6 +1942,30 @@ class DatabaseStorage implements IStorage {
       const monthlyOrders = allOrders.filter(o => new Date(o.createdAt) >= startOfMonth);
       const monthlyRevenue = monthlyOrders.reduce((sum, o) => sum + (parseFloat(o.totalAmount as string) || 0), 0);
       
+      // By period: today, mtd, last 30 days
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const startOfNextDay = new Date(startOfToday);
+      startOfNextDay.setDate(startOfNextDay.getDate() + 1);
+      const startOfLast30 = new Date(now);
+      startOfLast30.setDate(startOfLast30.getDate() - 30);
+      const ordersToday = allOrders.filter(o => {
+        const d = new Date(o.createdAt);
+        return d >= startOfToday && d < startOfNextDay;
+      });
+      const ordersMtd = allOrders.filter(o => new Date(o.createdAt) >= startOfMonth);
+      const ordersLast30 = allOrders.filter(o => new Date(o.createdAt) >= startOfLast30);
+      const aggregate = (orders: typeof allOrders) => ({
+        orderCount: orders.length,
+        revenue: orders.reduce((s, o) => s + (parseFloat(o.totalAmount as string) || 0), 0),
+        amountReceived: orders.reduce((s, o) => s + (parseFloat(o.amountReceived as string) || 0), 0),
+        amountPending: orders.reduce((s, o) => s + (parseFloat(o.balancePending as string) || 0), 0),
+      });
+      const byPeriod = {
+        today: aggregate(ordersToday),
+        mtd: aggregate(ordersMtd),
+        last30: aggregate(ordersLast30),
+      };
+      
       const ordersByStatus: Record<string, number> = {};
       const ordersByPaymentStatus: Record<string, number> = {};
       
@@ -2031,9 +2064,11 @@ class DatabaseStorage implements IStorage {
           pendingInvoices,
         },
         overduePayments: [],
+        byPeriod,
       };
     } catch (error) {
       console.error("Error fetching B2B dashboard stats:", error);
+      const emptyPeriod = { orderCount: 0, revenue: 0, amountReceived: 0, amountPending: 0 };
       return {
         totalClients: 0,
         activeOrders: 0,
@@ -2053,6 +2088,7 @@ class DatabaseStorage implements IStorage {
           pendingInvoices: 0,
         },
         overduePayments: [],
+        byPeriod: { today: emptyPeriod, mtd: emptyPeriod, last30: emptyPeriod },
       };
     }
   }

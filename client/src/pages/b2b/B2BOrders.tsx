@@ -35,10 +35,18 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Plus, Search, ShoppingCart, Calendar, User, IndianRupee, Eye, ChevronDown, RefreshCw, Pencil } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
 import type { B2BOrderWithDetails, B2BClient } from "@shared/schema";
+
+interface DashboardStatsByPeriod {
+  byPeriod?: {
+    today: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
+    mtd: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
+    last30: { orderCount: number; revenue: number; amountReceived: number; amountPending: number };
+  };
+}
 
 const orderFormSchema = z.object({
   clientId: z.string().min(1, "Client is required"),
@@ -104,6 +112,9 @@ const ITEMS_PER_PAGE = 10;
 export default function B2BOrders() {
   const { hasPermission, isSuperAdmin } = useAuth();
   const canEdit = isSuperAdmin || hasPermission("edit_b2b_orders");
+  const [location] = useLocation();
+  const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const viewPending = searchParams.get("view") === "pending";
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>("all");
@@ -117,6 +128,10 @@ export default function B2BOrders() {
 
   const { data: orders, isLoading } = useQuery<B2BOrderWithDetails[]>({
     queryKey: ["/api/b2b/orders"],
+  });
+
+  const { data: dashboardStats } = useQuery<DashboardStatsByPeriod>({
+    queryKey: ["/api/b2b/dashboard"],
   });
 
   const { data: clients } = useQuery<B2BClient[]>({
@@ -198,7 +213,9 @@ export default function B2BOrders() {
       order.client?.companyName?.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === "all" || order.status === statusFilter;
     const matchesAgent = agentFilter === "all" || order.createdBy === agentFilter;
-    return matchesSearch && matchesStatus && matchesAgent;
+    const matchesPending =
+      !viewPending || (parseFloat(String(order.balancePending ?? 0)) > 0);
+    return matchesSearch && matchesStatus && matchesAgent && matchesPending;
   });
 
   const agentOptions = Array.from(
@@ -214,7 +231,7 @@ export default function B2BOrders() {
 
   useEffect(() => {
     setDisplayCount(ITEMS_PER_PAGE);
-  }, [search, statusFilter, agentFilter]);
+  }, [search, statusFilter, agentFilter, viewPending]);
 
   const formatCurrency = (amount: string | number) => {
     const num = typeof amount === "string" ? parseFloat(amount) : amount;
@@ -253,6 +270,44 @@ export default function B2BOrders() {
           </Button>
         </Link>
       </div>
+
+      {dashboardStats?.byPeriod && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="orders-period-metrics">
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-sm font-medium text-muted-foreground">Today</p>
+              <p className="text-2xl font-bold">{dashboardStats.byPeriod.today.orderCount}</p>
+              <p className="text-xs text-muted-foreground">
+                {formatCurrency(dashboardStats.byPeriod.today.revenue)} revenue
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-sm font-medium text-muted-foreground">Month-to-Date</p>
+              <p className="text-2xl font-bold">{dashboardStats.byPeriod.mtd.orderCount}</p>
+              <p className="text-xs text-muted-foreground">
+                {formatCurrency(dashboardStats.byPeriod.mtd.revenue)} revenue
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-sm font-medium text-muted-foreground">Last 30 Days</p>
+              <p className="text-2xl font-bold">{dashboardStats.byPeriod.last30.orderCount}</p>
+              <p className="text-xs text-muted-foreground">
+                {formatCurrency(dashboardStats.byPeriod.last30.revenue)} revenue
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {viewPending && (
+        <div className="rounded-lg border bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 px-4 py-2 text-sm" data-testid="banner-pending-view">
+          Showing orders with pending amount. <Link href="/b2b/orders" className="underline font-medium">Show all orders</Link>
+        </div>
+      )}
 
       {/* Legacy dialog (deprecated - using landing page now) */}
       {false && (

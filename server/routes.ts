@@ -2217,16 +2217,14 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/b2b/orders/:id", authMiddleware, requirePermission(PERMISSION_CODES.DELETE_B2B_ORDERS), async (req, res) => {
+  app.delete("/api/b2b/orders/:id", authMiddleware, async (req, res) => {
     try {
-      // Check ownership before delete
+      if (!req.user!.isSuperAdmin) {
+        return res.status(403).json({ error: "Only super admin can delete B2B orders" });
+      }
       const existingOrder = await storage.getB2BOrderById(req.params.id);
       if (!existingOrder) {
         return res.status(404).json({ error: "Order not found" });
-      }
-      const canViewAll = await canViewAllB2BData(req.user!);
-      if (!canViewAll && existingOrder.createdBy !== req.user!.id) {
-        return res.status(403).json({ error: "You can only delete your own orders" });
       }
       await storage.deleteB2BOrder(req.params.id);
       res.json({ success: true });

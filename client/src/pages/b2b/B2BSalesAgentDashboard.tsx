@@ -1,16 +1,15 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
   Users, 
   ShoppingCart, 
-  IndianRupee, 
   Clock, 
   Plus, 
-  FileText, 
   CreditCard,
   AlertTriangle,
   TrendingUp,
@@ -18,6 +17,15 @@ import {
 } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
+
+type PeriodKey = "today" | "mtd" | "last30" | "all";
+
+interface PeriodMetrics {
+  orderCount: number;
+  revenue: number;
+  amountReceived: number;
+  amountPending: number;
+}
 
 interface DashboardStats {
   totalClients: number;
@@ -36,6 +44,11 @@ interface DashboardStats {
     pendingApprovals: number;
     overduePayments: number;
     pendingInvoices: number;
+  };
+  byPeriod?: {
+    today: PeriodMetrics;
+    mtd: PeriodMetrics;
+    last30: PeriodMetrics;
   };
 }
 
@@ -74,9 +87,18 @@ function formatCurrency(amount: number): string {
 }
 
 export default function B2BSalesAgentDashboard() {
+  const [period, setPeriod] = useState<PeriodKey>("all");
   const { data: stats, isLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/b2b/dashboard"],
   });
+
+  const periodMetrics =
+    period !== "all" && stats?.byPeriod ? stats.byPeriod[period] : null;
+  const displayOrders = periodMetrics?.orderCount ?? stats?.totalOrders ?? 0;
+  const displayOpenOrders = period === "all" ? (stats?.activeOrders ?? 0) : periodMetrics?.orderCount ?? 0;
+  const displayRevenue = periodMetrics?.revenue ?? (period === "mtd" ? stats?.monthlyRevenue : stats?.totalRevenue) ?? 0;
+  const displayAmountReceived = periodMetrics?.amountReceived ?? stats?.amountReceived ?? 0;
+  const displayAmountPending = periodMetrics?.amountPending ?? stats?.amountPending ?? 0;
 
   if (isLoading) {
     return (
@@ -133,6 +155,17 @@ export default function B2BSalesAgentDashboard() {
         </Link>
       </div>
 
+      {stats?.byPeriod && (
+        <Tabs value={period} onValueChange={(v) => setPeriod(v as PeriodKey)} className="w-full">
+          <TabsList className="grid w-full max-w-md grid-cols-4">
+            <TabsTrigger value="today">Today</TabsTrigger>
+            <TabsTrigger value="mtd">Month-to-Date</TabsTrigger>
+            <TabsTrigger value="last30">Last 30 Days</TabsTrigger>
+            <TabsTrigger value="all">All</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
+
       {/* Performance Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
@@ -148,40 +181,48 @@ export default function B2BSalesAgentDashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2 gap-2">
-            <CardTitle className="text-sm font-medium">Open Orders</CardTitle>
+            <CardTitle className="text-sm font-medium">{period === "all" ? "Open Orders" : "Orders"}</CardTitle>
             <ShoppingCart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold" data-testid="text-open-orders">{stats?.activeOrders || 0}</div>
-            <p className="text-xs text-muted-foreground">Orders in progress</p>
+            <div className="text-2xl font-bold" data-testid="text-open-orders">{displayOpenOrders}</div>
+            <p className="text-xs text-muted-foreground">
+              {period === "all" ? "Orders in progress" : "In selected period"}
+            </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2 gap-2">
-            <CardTitle className="text-sm font-medium">Monthly Revenue</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              {period === "mtd" || period === "all" ? "Monthly Revenue" : "Revenue"}
+            </CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold" data-testid="text-monthly-revenue">
-              {formatCurrency(stats?.monthlyRevenue || 0)}
+              {formatCurrency(displayRevenue)}
             </div>
-            <p className="text-xs text-muted-foreground">This month's orders</p>
+            <p className="text-xs text-muted-foreground">
+              {period === "all" ? "This month's orders" : "In selected period"}
+            </p>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2 gap-2">
-            <CardTitle className="text-sm font-medium">Pending Payments</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-amber-600" data-testid="text-pending-payments">
-              {formatCurrency(stats?.amountPending || 0)}
-            </div>
-            <p className="text-xs text-muted-foreground">Outstanding amounts</p>
-          </CardContent>
-        </Card>
+        <Link href="/b2b/orders?view=pending">
+          <Card className="cursor-pointer transition-colors hover:bg-muted/50 h-full" data-testid="card-pending-payments">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 gap-2">
+              <CardTitle className="text-sm font-medium">Pending Payments</CardTitle>
+              <Clock className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-amber-600" data-testid="text-pending-payments">
+                {formatCurrency(displayAmountPending)}
+              </div>
+              <p className="text-xs text-muted-foreground">Outstanding — click to view list</p>
+            </CardContent>
+          </Card>
+        </Link>
       </div>
 
       {/* Action Items */}
@@ -354,10 +395,12 @@ export default function B2BSalesAgentDashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Revenue</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              {period === "all" ? "Total Revenue" : "Revenue"}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-bold">{formatCurrency(stats?.totalRevenue || 0)}</div>
+            <div className="text-xl font-bold">{formatCurrency(displayRevenue)}</div>
           </CardContent>
         </Card>
         <Card>
@@ -365,15 +408,17 @@ export default function B2BSalesAgentDashboard() {
             <CardTitle className="text-sm font-medium text-muted-foreground">Amount Received</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-bold text-green-600">{formatCurrency(stats?.amountReceived || 0)}</div>
+            <div className="text-xl font-bold text-green-600">{formatCurrency(displayAmountReceived)}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Orders</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              {period === "all" ? "Total Orders" : "Orders"}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-bold">{stats?.totalOrders || 0}</div>
+            <div className="text-xl font-bold">{displayOrders}</div>
           </CardContent>
         </Card>
       </div>
