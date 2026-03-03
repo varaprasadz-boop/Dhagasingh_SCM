@@ -21,17 +21,27 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Truck, Download, Eye, MapPin, Phone, Mail, Package, Clock, ArrowUpDown, Loader2, Upload, AlertCircle, CheckCircle2, RefreshCw } from "lucide-react";
+import { Truck, Download, Eye, MapPin, Phone, Mail, Package, Clock, ArrowUpDown, Loader2, Upload, AlertCircle, CheckCircle2, RefreshCw, Ban } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { OrderImportModal } from "@/components/OrderImportModal";
 import type { OrderWithItems, CourierPartner, User, ProductWithVariants } from "@shared/schema";
 
-type OrderStatus = "pending" | "dispatched" | "delivered" | "rto" | "returned" | "refunded";
+type OrderStatus = "pending" | "dispatched" | "delivered" | "rto" | "returned" | "refunded" | "cancelled";
 type SortOption = "newest" | "oldest" | "amount_high" | "amount_low";
 
 function getAgeing(createdAt: string | Date | null): number {
@@ -52,6 +62,7 @@ export default function Orders() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [sortOption, setSortOption] = useState<SortOption>("newest");
   const [selectedOrders, setSelectedOrders] = useState<OrderWithItems[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderWithItems | null>(null);
@@ -113,6 +124,18 @@ export default function Orders() {
       resetDispatchForm();
     },
     onError: (error: Error) => {
+      const msg = error.message || "";
+      if (msg.startsWith("400: ")) {
+        try {
+          const body = JSON.parse(msg.slice(5)) as { error?: string; details?: string[] };
+          const title = body.error ?? "Dispatch failed";
+          const description = Array.isArray(body.details) ? body.details.join(", ") : msg;
+          toast({ title, description, variant: "destructive" });
+          return;
+        } catch {
+          // fall through to generic
+        }
+      }
       toast({ title: "Failed to dispatch order", description: error.message, variant: "destructive" });
     },
   });
@@ -324,6 +347,7 @@ export default function Orders() {
     dispatched: orders.filter((o) => o.status === "dispatched").length,
     delivered: orders.filter((o) => o.status === "delivered").length,
     rto: orders.filter((o) => o.status === "rto").length,
+    cancelled: orders.filter((o) => o.status === "cancelled").length,
   };
 
   const thirdPartyCouriers = couriers.filter((c) => c.type === "third_party");
@@ -382,6 +406,9 @@ export default function Orders() {
           </TabsTrigger>
           <TabsTrigger value="rto" data-testid="tab-rto">
             RTO ({statusCounts.rto})
+          </TabsTrigger>
+          <TabsTrigger value="cancelled" data-testid="tab-cancelled">
+            Cancelled ({statusCounts.cancelled})
           </TabsTrigger>
         </TabsList>
       </Tabs>
@@ -688,6 +715,45 @@ export default function Orders() {
                         Dispatch Order
                       </Button>
                     </div>
+                  )}
+
+                  {selectedOrder.status === "pending" && (
+                    <AlertDialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+                      <Button
+                        className="w-full"
+                        variant="destructive"
+                        onClick={() => setCancelDialogOpen(true)}
+                        data-testid="button-cancel-order"
+                      >
+                        <Ban className="h-4 w-4 mr-2" />
+                        Cancel Order
+                      </Button>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Cancel order?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This order will be marked as cancelled. You can still view it in the Cancelled tab.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Keep</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => {
+                              if (selectedOrder) {
+                                updateStatusMutation.mutate(
+                                  { orderId: selectedOrder.id, status: "cancelled" },
+                                  { onSettled: () => setCancelDialogOpen(false) }
+                                );
+                              }
+                            }}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            data-testid="button-confirm-cancel-order"
+                          >
+                            Cancel Order
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   )}
 
                   {selectedOrder.status === "dispatched" && (

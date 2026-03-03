@@ -83,6 +83,31 @@ export async function registerRoutes(
 ): Promise<Server> {
   await storage.seedDefaultData();
 
+  async function returnStockForRTO(
+    orderId: string,
+    order: { orderNumber: string; items?: { sku: string; quantity: number }[] }
+  ): Promise<void> {
+    if (!order.items?.length) return;
+    for (const item of order.items) {
+      const variant = await storage.getProductVariantBySku(item.sku);
+      if (variant) {
+        const newQuantity = variant.stockQuantity + item.quantity;
+        await storage.createStockMovement({
+          productVariantId: variant.id,
+          type: "inward",
+          quantity: item.quantity,
+          previousQuantity: variant.stockQuantity,
+          newQuantity,
+          reason: `RTO return: ${order.orderNumber}`,
+          orderId,
+        });
+        await storage.updateProductVariant(variant.id, {
+          stockQuantity: newQuantity,
+        });
+      }
+    }
+  }
+
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { email, password } = req.body;
@@ -917,6 +942,15 @@ export async function registerRoutes(
   app.post("/api/orders/:id/status", authMiddleware, requirePermission(PERMISSION_CODES.DISPATCH_ORDERS), async (req, res) => {
     try {
       const { status, comment } = req.body;
+      if (status === "rto") {
+        const order = await storage.getOrderById(req.params.id);
+        if (!order) {
+          return res.status(404).json({ error: "Order not found" });
+        }
+        if (order.status === "dispatched") {
+          await returnStockForRTO(req.params.id, order);
+        }
+      }
       const order = await storage.updateOrderStatus(req.params.id, status, comment, req.user!.id);
       
       if (!order) {
@@ -945,6 +979,60 @@ export async function registerRoutes(
       const order = await storage.getOrderById(req.params.id);
       if (!order) {
         return res.status(404).json({ error: "Order not found" });
+      }
+
+      if (order.status !== "pending") {
+        return res.status(400).json({ error: "Only pending orders can be dispatched" });
+      }
+
+      if (!order.items || order.items.length === 0) {
+        return res.status(400).json({ error: "Order has no items" });
+      }
+
+      const stockIssues: string[] = [];
+      const missingVariants: string[] = [];
+
+      for (const item of order.items) {
+        const variant = await storage.getProductVariantBySku(item.sku);
+        if (!variant) {
+          missingVariants.push(item.sku);
+        } else if (variant.stockQuantity < item.quantity) {
+          stockIssues.push(`${item.sku}: need ${item.quantity}, have ${variant.stockQuantity}`);
+        }
+      }
+
+      if (missingVariants.length > 0) {
+        return res.status(400).json({ 
+          error: "Product variants not found", 
+          details: missingVariants 
+        });
+      }
+
+      if (stockIssues.length > 0) {
+        return res.status(400).json({ 
+          error: "Insufficient stock for dispatch", 
+          details: stockIssues 
+        });
+      }
+
+      for (const item of order.items) {
+        const variant = await storage.getProductVariantBySku(item.sku);
+        if (variant) {
+          const newQuantity = variant.stockQuantity - item.quantity;
+          await storage.createStockMovement({
+            productVariantId: variant.id,
+            type: "outward",
+            quantity: item.quantity,
+            previousQuantity: variant.stockQuantity,
+            newQuantity,
+            reason: `Order dispatch: ${order.orderNumber}`,
+            orderId: req.params.id,
+          });
+
+          await storage.updateProductVariant(variant.id, {
+            stockQuantity: newQuantity,
+          });
+        }
       }
 
       await storage.updateOrder(req.params.id, {
@@ -1588,6 +1676,10 @@ export async function registerRoutes(
       if (status === "delivered") {
         await storage.updateOrderStatus(delivery.orderId, "delivered", "Delivered by in-house courier", req.user!.id);
       } else if (status === "failed" || status === "rto") {
+        const order = await storage.getOrderById(delivery.orderId);
+        if (order?.status === "dispatched") {
+          await returnStockForRTO(delivery.orderId, order);
+        }
         await storage.updateOrderStatus(delivery.orderId, "rto", req.body.failureReason || "Delivery failed", req.user!.id);
       }
 
