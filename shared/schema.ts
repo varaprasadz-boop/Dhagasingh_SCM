@@ -10,7 +10,9 @@ export const paymentStatusEnum = pgEnum("payment_status", ["pending", "paid", "r
 export const courierTypeEnum = pgEnum("courier_type", ["third_party", "in_house"]);
 export const complaintStatusEnum = pgEnum("complaint_status", ["open", "in_progress", "resolved", "rejected"]);
 export const complaintReasonEnum = pgEnum("complaint_reason", ["wrong_item", "damaged", "delayed", "not_received", "quality", "size_exchange", "other"]);
-export const stockMovementTypeEnum = pgEnum("stock_movement_type", ["inward", "outward", "adjustment"]);
+export const stockMovementTypeEnum = pgEnum("stock_movement_type", ["inward", "outward", "adjustment", "damaged", "return_good"]);
+export const complaintCategoryEnum = pgEnum("complaint_category", ["general", "refund", "replacement"]);
+export const productConditionEnum = pgEnum("product_condition", ["good", "damaged"]);
 export const deliveryStatusEnum = pgEnum("delivery_status", ["assigned", "out_for_delivery", "delivered", "payment_collected", "failed", "rto"]);
 export const userStatusEnum = pgEnum("user_status", ["active", "inactive"]);
 
@@ -120,6 +122,7 @@ export const productVariants = pgTable("product_variants", {
   color: text("color"),
   size: text("size"),
   stockQuantity: integer("stock_quantity").default(0).notNull(),
+  damagedQuantity: integer("damaged_quantity").default(0).notNull(),
   costPrice: decimal("cost_price", { precision: 10, scale: 2 }).default("0").notNull(),
   sellingPrice: decimal("selling_price", { precision: 10, scale: 2 }).default("0").notNull(),
   lowStockThreshold: integer("low_stock_threshold").default(10),
@@ -179,6 +182,12 @@ export const orders = pgTable("orders", {
   notes: text("notes"),
   rtoReason: text("rto_reason"),
   shopifyData: jsonb("shopify_data"), // Store raw Shopify data for reference
+  // RTO product receive tracking
+  rtoReceivedBy: varchar("rto_received_by").references(() => users.id),
+  rtoReceivedAt: timestamp("rto_received_at"),
+  rtoProductCondition: productConditionEnum("rto_product_condition"),
+  rtoNotes: text("rto_notes"),
+  rtoStockProcessed: boolean("rto_stock_processed").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -232,6 +241,7 @@ export const complaints = pgTable("complaints", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   ticketNumber: text("ticket_number").notNull().unique(),
   orderId: varchar("order_id").notNull().references(() => orders.id),
+  category: complaintCategoryEnum("category").default("general").notNull(),
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email"),
   customerPhone: text("customer_phone"),
@@ -242,6 +252,20 @@ export const complaints = pgTable("complaints", {
   assignedTo: varchar("assigned_to").references(() => users.id),
   resolutionType: text("resolution_type"), // refund, replacement, rejected
   resolutionNotes: text("resolution_notes"),
+  // Return receive tracking
+  returnReceivedBy: varchar("return_received_by").references(() => users.id),
+  returnReceivedAt: timestamp("return_received_at"),
+  returnProductCondition: productConditionEnum("return_product_condition"),
+  returnNotes: text("return_notes"),
+  returnStockProcessed: boolean("return_stock_processed").default(false).notNull(),
+  // Refund transaction details
+  refundAmount: decimal("refund_amount", { precision: 10, scale: 2 }),
+  refundMode: text("refund_mode"),
+  refundReference: text("refund_reference"),
+  refundDate: timestamp("refund_date"),
+  refundProcessedBy: varchar("refund_processed_by").references(() => users.id),
+  // Replacement order link
+  replacementOrderId: varchar("replacement_order_id").references(() => orders.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   resolvedAt: timestamp("resolved_at"),

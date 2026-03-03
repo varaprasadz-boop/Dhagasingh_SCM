@@ -45,6 +45,7 @@ export function ProductVariantTable({
             <TableHead>Color</TableHead>
             <TableHead>Size</TableHead>
             <TableHead className="text-right">Stock</TableHead>
+            <TableHead className="text-right">Damaged</TableHead>
             <TableHead className="text-right">Cost</TableHead>
             <TableHead className="text-right">Price</TableHead>
             {editable && <TableHead className="text-right">Quantity</TableHead>}
@@ -78,6 +79,13 @@ export function ProductVariantTable({
                       {status.label}
                     </Badge>
                   </div>
+                </TableCell>
+                <TableCell className="text-right">
+                  {((variant as any).damagedQuantity ?? 0) > 0 ? (
+                    <span className="font-medium text-orange-600 dark:text-orange-400">{(variant as any).damagedQuantity}</span>
+                  ) : (
+                    <span className="text-muted-foreground">0</span>
+                  )}
                 </TableCell>
                 <TableCell className="text-right">₹{variant.costPrice}</TableCell>
                 <TableCell className="text-right">₹{variant.sellingPrice}</TableCell>

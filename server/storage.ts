@@ -215,6 +215,7 @@ interface StockMovementFilters {
 interface ComplaintFilters {
   status?: Complaint["status"];
   reason?: Complaint["reason"];
+  category?: Complaint["category"];
   assignedTo?: string;
   fromDate?: Date;
   toDate?: Date;
@@ -1134,6 +1135,9 @@ class DatabaseStorage implements IStorage {
       }
       if (filters?.reason) {
         conditions.push(eq(complaints.reason, filters.reason));
+      }
+      if (filters?.category) {
+        conditions.push(eq(complaints.category, filters.category));
       }
       if (filters?.assignedTo) {
         conditions.push(eq(complaints.assignedTo, filters.assignedTo));

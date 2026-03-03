@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DataTable } from "@/components/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -69,6 +69,8 @@ export default function Orders() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
   const [showReplacementForm, setShowReplacementForm] = useState(false);
+  const [rtoCondition, setRtoCondition] = useState<"good" | "damaged">("good");
+  const [rtoNotes, setRtoNotes] = useState("");
 
   const [dispatchForm, setDispatchForm] = useState({
     courierType: "third_party" as "third_party" | "in_house",
@@ -91,15 +93,27 @@ export default function Orders() {
     queryKey: ["/api/users"],
   });
 
-  const { data: products = [] } = useQuery<ProductWithVariants[]>({
+  const { data: products = [], refetch: refetchProducts } = useQuery<ProductWithVariants[]>({
     queryKey: ["/api/products"],
   });
 
+  // Refetch products when opening order detail so stock badges are up to date (avoids stale cache)
+  useEffect(() => {
+    if (detailSheetOpen && selectedOrder) {
+      refetchProducts();
+    }
+  }, [detailSheetOpen, selectedOrder?.id, refetchProducts]);
+
   const getStockForSku = (sku: string): { available: number; inStock: boolean } => {
+    const skuNorm = (sku || "").trim().toLowerCase();
+    if (!skuNorm) return { available: 0, inStock: false };
     for (const product of products) {
-      const variant = product.variants.find((v) => v.sku === sku);
+      const variant = product.variants.find(
+        (v) => (v.sku || "").trim().toLowerCase() === skuNorm
+      );
       if (variant) {
-        return { available: variant.stockQuantity, inStock: variant.stockQuantity > 0 };
+        const qty = Number(variant.stockQuantity) ?? 0;
+        return { available: qty, inStock: qty > 0 };
       }
     }
     return { available: 0, inStock: false };
@@ -145,10 +159,26 @@ export default function Orders() {
       apiRequest("POST", `/api/orders/${data.orderId}/status`, { status: data.status, comment: data.comment }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       toast({ title: "Order status updated" });
     },
     onError: (error: Error) => {
       toast({ title: "Failed to update status", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const receiveRtoMutation = useMutation({
+    mutationFn: (data: { orderId: string; productCondition: "good" | "damaged"; rtoNotes?: string }) =>
+      apiRequest("POST", `/api/orders/${data.orderId}/receive-rto`, { productCondition: data.productCondition, rtoNotes: data.rtoNotes }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      toast({ title: "RTO received and stock updated" });
+      setRtoNotes("");
+      setDetailSheetOpen(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to receive RTO", description: error.message, variant: "destructive" });
     },
   });
 
@@ -757,18 +787,73 @@ export default function Orders() {
                   )}
 
                   {selectedOrder.status === "dispatched" && (
-                    <Button
-                      className="w-full"
-                      variant="outline"
-                      onClick={() => handleStatusUpdate(selectedOrder.id, "delivered")}
-                      disabled={updateStatusMutation.isPending}
-                      data-testid="button-mark-delivered"
-                    >
-                      {updateStatusMutation.isPending ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : null}
-                      Mark as Delivered
-                    </Button>
+                    <>
+                      <Button
+                        className="w-full"
+                        variant="outline"
+                        onClick={() => handleStatusUpdate(selectedOrder.id, "delivered")}
+                        disabled={updateStatusMutation.isPending}
+                        data-testid="button-mark-delivered"
+                      >
+                        {updateStatusMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : null}
+                        Mark as Delivered
+                      </Button>
+                      <Button
+                        className="w-full"
+                        variant="outline"
+                        onClick={() => handleStatusUpdate(selectedOrder.id, "rto")}
+                        disabled={updateStatusMutation.isPending}
+                        data-testid="button-mark-rto"
+                      >
+                        Mark as RTO
+                      </Button>
+                    </>
+                  )}
+
+                  {selectedOrder.status === "rto" && (
+                    <div className="space-y-4 p-4 border rounded-md bg-muted/50">
+                      <h4 className="font-semibold flex items-center gap-2">
+                        <Package className="h-4 w-4" />
+                        RTO Product Receive
+                      </h4>
+                      {(selectedOrder as any).rtoReceivedBy ? (
+                        <div className="text-sm space-y-1">
+                          <p className="text-muted-foreground">Received — Condition: <Badge variant={(selectedOrder as any).rtoProductCondition === "good" ? "default" : "destructive"}>{(selectedOrder as any).rtoProductCondition === "good" ? "Good" : "Damaged"}</Badge></p>
+                          <p className="text-muted-foreground">Stock: {(selectedOrder as any).rtoProductCondition === "good" ? "Added back to stock" : "Added to damaged count"}</p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="space-y-2">
+                            <Label>Product condition</Label>
+                            <RadioGroup value={rtoCondition} onValueChange={(v: "good" | "damaged") => setRtoCondition(v)} className="flex gap-4">
+                              <div className="flex items-center space-x-2">
+                                <RadioGroupItem value="good" id="rto-good" />
+                                <Label htmlFor="rto-good" className="font-normal">Good Condition</Label>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <RadioGroupItem value="damaged" id="rto-damaged" />
+                                <Label htmlFor="rto-damaged" className="font-normal">Damaged</Label>
+                              </div>
+                            </RadioGroup>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Notes</Label>
+                            <Input value={rtoNotes} onChange={(e) => setRtoNotes(e.target.value)} placeholder="Condition notes..." />
+                          </div>
+                          <Button
+                            className="w-full"
+                            onClick={() => receiveRtoMutation.mutate({ orderId: selectedOrder.id, productCondition: rtoCondition, rtoNotes: rtoNotes || undefined })}
+                            disabled={receiveRtoMutation.isPending}
+                            data-testid="button-confirm-receive-rto"
+                          >
+                            {receiveRtoMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                            Confirm Received
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   )}
 
                   {selectedOrder.status === "delivered" && !showReplacementForm && (

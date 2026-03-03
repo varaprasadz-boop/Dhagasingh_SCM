@@ -963,6 +963,70 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/orders/:id/receive-rto", authMiddleware, requirePermission(PERMISSION_CODES.DISPATCH_ORDERS), async (req, res) => {
+    try {
+      const order = await storage.getOrderById(req.params.id);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+      if (order.status !== "rto") {
+        return res.status(400).json({ error: "Only RTO orders can receive RTO product" });
+      }
+      if ((order as any).rtoStockProcessed) {
+        return res.status(400).json({ error: "RTO already received and processed" });
+      }
+      const { productCondition, rtoNotes } = req.body;
+      if (!productCondition || !["good", "damaged"].includes(productCondition)) {
+        return res.status(400).json({ error: "productCondition must be good or damaged" });
+      }
+      if (!order.items?.length) return res.status(400).json({ error: "Order has no items" });
+
+      for (const item of order.items) {
+        const variant = await storage.getProductVariantBySku(item.sku);
+        if (!variant) continue;
+        if (productCondition === "good") {
+          const prev = variant.stockQuantity;
+          const newQty = prev + item.quantity;
+          await storage.updateProductVariant(variant.id, { stockQuantity: newQty });
+          await storage.createStockMovement({
+            productVariantId: variant.id,
+            type: "return_good",
+            quantity: item.quantity,
+            previousQuantity: prev,
+            newQuantity: newQty,
+            reason: `RTO received good — Order: ${order.orderNumber}`,
+            orderId: order.id,
+          });
+        } else {
+          const prevDamaged = (variant as any).damagedQuantity ?? 0;
+          const newDamaged = prevDamaged + item.quantity;
+          await storage.updateProductVariant(variant.id, { damagedQuantity: newDamaged } as any);
+          await storage.createStockMovement({
+            productVariantId: variant.id,
+            type: "damaged",
+            quantity: item.quantity,
+            previousQuantity: prevDamaged,
+            newQuantity: newDamaged,
+            reason: `RTO damaged — Order: ${order.orderNumber}`,
+            orderId: order.id,
+          });
+        }
+      }
+
+      await storage.updateOrder(req.params.id, {
+        rtoReceivedBy: req.user!.id,
+        rtoReceivedAt: new Date(),
+        rtoProductCondition: productCondition,
+        rtoNotes: rtoNotes || null,
+        rtoStockProcessed: true,
+      });
+      await storage.updateOrderStatus(req.params.id, "returned", `RTO received — Condition: ${productCondition}`, req.user!.id);
+      const updated = await storage.getOrderById(req.params.id);
+      res.json(updated);
+    } catch (error) {
+      console.error("Receive RTO error:", error);
+      res.status(500).json({ error: "Failed to receive RTO" });
+    }
+  });
+
   app.post("/api/orders/:id/dispatch", authMiddleware, requirePermission(PERMISSION_CODES.DISPATCH_ORDERS), async (req, res) => {
     try {
       // Validate payload with Zod schema
@@ -1483,6 +1547,7 @@ export async function registerRoutes(
     const filters: any = {};
     if (req.query.status) filters.status = req.query.status;
     if (req.query.reason) filters.reason = req.query.reason;
+    if (req.query.category) filters.category = req.query.category;
     if (req.query.assignedTo) filters.assignedTo = req.query.assignedTo;
 
     const complaints = await storage.getComplaints(filters);
@@ -1499,26 +1564,37 @@ export async function registerRoutes(
 
   app.post("/api/complaints", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_COMPLAINTS), async (req, res) => {
     try {
+      const { orderId, reason, description, category } = req.body;
+      const cat = category && ["general", "refund", "replacement"].includes(category) ? category : "general";
+
+      if (!orderId || !reason) {
+        return res.status(400).json({ error: "Order and reason are required" });
+      }
+
       const complaintCount = (await storage.getComplaints()).length + 1;
       const ticketNumber = `TKT-${String(complaintCount).padStart(5, '0')}`;
 
-      const order = await storage.getOrderById(req.body.orderId);
+      const order = await storage.getOrderById(orderId);
       if (!order) {
         return res.status(404).json({ error: "Order not found" });
       }
 
       const complaint = await storage.createComplaint({
-        ...req.body,
+        orderId,
+        category: cat,
+        reason,
+        description: description || null,
         ticketNumber,
         customerName: order.customerName,
         customerEmail: order.customerEmail,
         customerPhone: order.customerPhone,
       });
 
+      const categoryLabel = cat === "replacement" ? "Replacement" : cat === "refund" ? "Refund" : "General";
       await storage.addComplaintTimelineEntry({
         complaintId: complaint.id,
-        action: "Ticket Created",
-        comment: req.body.description || "Ticket created",
+        action: "Complaint registered — Category: " + categoryLabel,
+        comment: description || "Ticket created",
         employeeId: req.user!.id,
         employeeName: req.user!.name,
         employeeRole: req.user!.role?.name || "Staff",
@@ -1608,6 +1684,185 @@ export async function registerRoutes(
       res.json(updatedComplaint);
     } catch (error) {
       res.status(500).json({ error: "Failed to resolve complaint" });
+    }
+  });
+
+  app.post("/api/complaints/:id/receive-return", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_COMPLAINTS), async (req, res) => {
+    try {
+      const complaint = await storage.getComplaintById(req.params.id);
+      if (!complaint) return res.status(404).json({ error: "Complaint not found" });
+      if (complaint.returnStockProcessed) {
+        return res.status(400).json({ error: "Return already processed" });
+      }
+      const { productCondition, returnNotes } = req.body;
+      if (!productCondition || !["good", "damaged"].includes(productCondition)) {
+        return res.status(400).json({ error: "productCondition must be good or damaged" });
+      }
+      const order = await storage.getOrderById(complaint.orderId);
+      if (!order?.items?.length) return res.status(400).json({ error: "Order or items not found" });
+
+      for (const item of order.items) {
+        const variant = await storage.getProductVariantBySku(item.sku);
+        if (!variant) continue;
+        if (productCondition === "good") {
+          const prev = variant.stockQuantity;
+          const newQty = prev + item.quantity;
+          await storage.updateProductVariant(variant.id, { stockQuantity: newQty });
+          await storage.createStockMovement({
+            productVariantId: variant.id,
+            type: "return_good",
+            quantity: item.quantity,
+            previousQuantity: prev,
+            newQuantity: newQty,
+            reason: `Return received — Complaint: ${complaint.ticketNumber}`,
+            orderId: complaint.orderId,
+          });
+        } else {
+          const prevDamaged = (variant as any).damagedQuantity ?? 0;
+          const newDamaged = prevDamaged + item.quantity;
+          await storage.updateProductVariant(variant.id, { damagedQuantity: newDamaged } as any);
+          await storage.createStockMovement({
+            productVariantId: variant.id,
+            type: "damaged",
+            quantity: item.quantity,
+            previousQuantity: prevDamaged,
+            newQuantity: newDamaged,
+            reason: `Damaged return — Complaint: ${complaint.ticketNumber}`,
+            orderId: complaint.orderId,
+          });
+        }
+      }
+
+      await storage.updateComplaint(req.params.id, {
+        returnReceivedBy: req.user!.id,
+        returnReceivedAt: new Date(),
+        returnProductCondition: productCondition,
+        returnNotes: returnNotes || null,
+        returnStockProcessed: true,
+      });
+      await storage.addComplaintTimelineEntry({
+        complaintId: req.params.id,
+        action: "Product received — Condition: " + (productCondition === "good" ? "Good" : "Damaged") + " — By: " + req.user!.name,
+        comment: returnNotes || undefined,
+        employeeId: req.user!.id,
+        employeeName: req.user!.name,
+        employeeRole: req.user!.role?.name || "Staff",
+      });
+      const updated = await storage.getComplaintById(req.params.id);
+      res.json(updated);
+    } catch (error) {
+      console.error("Receive return error:", error);
+      res.status(500).json({ error: "Failed to process return" });
+    }
+  });
+
+  app.post("/api/complaints/:id/create-replacement-order", authMiddleware, requirePermission(PERMISSION_CODES.MANAGE_COMPLAINTS), async (req, res) => {
+    try {
+      const complaint = await storage.getComplaintById(req.params.id);
+      if (!complaint) return res.status(404).json({ error: "Complaint not found" });
+      if (complaint.category !== "replacement") {
+        return res.status(400).json({ error: "Only replacement complaints can create replacement orders" });
+      }
+      if (!complaint.returnReceivedBy) {
+        return res.status(400).json({ error: "Receive return first before creating replacement order" });
+      }
+      const order = await storage.getOrderById(complaint.orderId);
+      if (!order?.items?.length) return res.status(400).json({ error: "Order or items not found" });
+
+      const orderNumber = `${order.orderNumber}-R`;
+      const orderData = {
+        orderNumber,
+        customerName: order.customerName,
+        customerEmail: order.customerEmail,
+        customerPhone: order.customerPhone,
+        shippingAddress: order.shippingAddress,
+        shippingCity: order.shippingCity,
+        shippingState: order.shippingState,
+        shippingZip: order.shippingZip,
+        shippingCountry: order.shippingCountry,
+        billingAddress: order.billingAddress,
+        billingCity: order.billingCity,
+        billingState: order.billingState,
+        billingZip: order.billingZip,
+        billingCountry: order.billingCountry,
+        subtotal: order.subtotal,
+        shippingCost: order.shippingCost,
+        discount: order.discount,
+        taxes: order.taxes,
+        totalAmount: order.totalAmount,
+        paymentMethod: order.paymentMethod,
+        paymentStatus: order.paymentStatus,
+        status: "pending" as const,
+        notes: order.notes ? `Replacement for ${order.orderNumber}. ${order.notes}` : `Replacement for ${order.orderNumber}`,
+      };
+      const items = order.items.map((i) => ({
+        productVariantId: i.productVariantId,
+        sku: i.sku,
+        productName: i.productName,
+        color: i.color,
+        size: i.size,
+        quantity: i.quantity,
+        price: i.price,
+        compareAtPrice: i.compareAtPrice,
+      }));
+      const newOrder = await storage.createOrder(orderData as any, items as any);
+      await storage.updateComplaint(req.params.id, {
+        replacementOrderId: newOrder.id,
+        status: "in_progress",
+      });
+      await storage.addComplaintTimelineEntry({
+        complaintId: req.params.id,
+        action: "Replacement order created: " + orderNumber,
+        comment: undefined,
+        employeeId: req.user!.id,
+        employeeName: req.user!.name,
+        employeeRole: req.user!.role?.name || "Staff",
+      });
+      const updated = await storage.getComplaintById(req.params.id);
+      res.json(updated);
+    } catch (error) {
+      console.error("Create replacement order error:", error);
+      res.status(500).json({ error: "Failed to create replacement order" });
+    }
+  });
+
+  app.post("/api/complaints/:id/process-refund", authMiddleware, requirePermission(PERMISSION_CODES.RESOLVE_COMPLAINTS), async (req, res) => {
+    try {
+      const complaint = await storage.getComplaintById(req.params.id);
+      if (!complaint) return res.status(404).json({ error: "Complaint not found" });
+      if (complaint.category !== "refund") {
+        return res.status(400).json({ error: "Only refund complaints can process refund" });
+      }
+      if (!complaint.returnReceivedBy) {
+        return res.status(400).json({ error: "Receive return first before processing refund" });
+      }
+      const { refundAmount, refundMode, refundReference, refundDate } = req.body;
+      if (refundAmount == null) return res.status(400).json({ error: "refundAmount is required" });
+
+      await storage.updateComplaint(req.params.id, {
+        refundAmount: String(refundAmount),
+        refundMode: refundMode || null,
+        refundReference: refundReference || null,
+        refundDate: refundDate ? new Date(refundDate) : new Date(),
+        refundProcessedBy: req.user!.id,
+        status: "resolved",
+        resolutionType: "refund",
+        resolutionNotes: `Refund processed — ₹${refundAmount} via ${refundMode || "N/A"}`,
+      });
+      await storage.updateOrderStatus(complaint.orderId, "refunded", "Refund processed via complaint", req.user!.id);
+      await storage.addComplaintTimelineEntry({
+        complaintId: req.params.id,
+        action: `Refund processed — ₹${refundAmount} via ${refundMode || "N/A"} — Ref: ${refundReference || "—"}`,
+        comment: undefined,
+        employeeId: req.user!.id,
+        employeeName: req.user!.name,
+        employeeRole: req.user!.role?.name || "Staff",
+      });
+      const updated = await storage.getComplaintById(req.params.id);
+      res.json(updated);
+    } catch (error) {
+      console.error("Process refund error:", error);
+      res.status(500).json({ error: "Failed to process refund" });
     }
   });
 
@@ -1821,6 +2076,105 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Dashboard stats error:", error);
       res.status(500).json({ error: "Failed to get dashboard stats" });
+    }
+  });
+
+  app.get("/api/reports/complaints-returns", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_REPORTS), async (req, res) => {
+    try {
+      const fromDate = req.query.fromDate ? new Date(req.query.fromDate as string) : undefined;
+      const toDate = req.query.toDate ? new Date(req.query.toDate as string) : undefined;
+      const filters: any = {};
+      if (fromDate) filters.fromDate = fromDate;
+      if (toDate) filters.toDate = toDate;
+
+      const complaints = await storage.getComplaints(filters);
+      const orders = await storage.getOrders();
+      const products = await storage.getProducts();
+
+      const byCategory = { general: 0, refund: 0, replacement: 0 };
+      const byReason: Record<string, number> = {};
+      let totalRefundAmount = 0;
+      let replacementsCount = 0;
+      let returnGoodCount = 0;
+      let returnDamagedCount = 0;
+      const refundList: { orderNumber: string; amount: number; mode: string; date: string; processedBy: string }[] = [];
+      let resolvedCount = 0;
+      let totalResolutionDays = 0;
+
+      for (const c of complaints) {
+        const cat = (c as any).category || "general";
+        byCategory[cat as keyof typeof byCategory] = (byCategory[cat as keyof typeof byCategory] || 0) + 1;
+        byReason[c.reason] = (byReason[c.reason] || 0) + 1;
+        if (c.status === "resolved") {
+          resolvedCount++;
+          if (c.resolvedAt && c.createdAt) {
+            totalResolutionDays += Math.ceil((new Date(c.resolvedAt).getTime() - new Date(c.createdAt).getTime()) / (1000 * 60 * 60 * 24));
+          }
+        }
+        if ((c as any).refundAmount) {
+          totalRefundAmount += parseFloat((c as any).refundAmount);
+          refundList.push({
+            orderNumber: (c as any).order?.orderNumber || "-",
+            amount: parseFloat((c as any).refundAmount),
+            mode: (c as any).refundMode || "-",
+            date: (c as any).refundDate ? new Date((c as any).refundDate).toLocaleDateString("en-IN") : "-",
+            processedBy: (c as any).refundProcessedBy ? "—" : "-",
+          });
+        }
+        if ((c as any).replacementOrderId) replacementsCount++;
+        if ((c as any).returnProductCondition === "good") returnGoodCount++;
+        if ((c as any).returnProductCondition === "damaged") returnDamagedCount++;
+      }
+
+      const rtoOrders = orders.filter((o: any) => o.status === "rto" || o.status === "returned");
+      let rtoReceivedGood = 0;
+      let rtoReceivedDamaged = 0;
+      const byCourier: Record<string, { total: number; rto: number }> = {};
+      for (const o of orders) {
+        const cp = (o as any).courierPartnerId || "unknown";
+        if (!byCourier[cp]) byCourier[cp] = { total: 0, rto: 0 };
+        if ((o as any).status === "dispatched" || (o as any).status === "delivered" || (o as any).status === "rto" || (o as any).status === "returned") byCourier[cp].total++;
+        if ((o as any).status === "rto" || (o as any).status === "returned") byCourier[cp].rto++;
+      }
+      for (const o of rtoOrders) {
+        if ((o as any).rtoProductCondition === "good") rtoReceivedGood++;
+        if ((o as any).rtoProductCondition === "damaged") rtoReceivedDamaged++;
+      }
+
+      let totalDamagedUnits = 0;
+      let totalDamagedValue = 0;
+      for (const p of products) {
+        for (const v of p.variants) {
+          const d = (v as any).damagedQuantity ?? 0;
+          totalDamagedUnits += d;
+          totalDamagedValue += d * parseFloat(v.costPrice || "0");
+        }
+      }
+
+      res.json({
+        complaintSummary: {
+          total: complaints.length,
+          byCategory: { general: byCategory.general, refund: byCategory.refund, replacement: byCategory.replacement },
+          resolutionRate: complaints.length > 0 ? (resolvedCount / complaints.length) * 100 : 0,
+          avgResolutionDays: resolvedCount > 0 ? totalResolutionDays / resolvedCount : 0,
+          totalRefundAmount,
+          totalReplacements: replacementsCount,
+        },
+        byReason: Object.entries(byReason).map(([reason, count]) => ({ reason, count })),
+        byCategory: byCategory,
+        returnCondition: { good: returnGoodCount + rtoReceivedGood, damaged: returnDamagedCount + rtoReceivedDamaged },
+        rtoAnalysis: {
+          totalRto: rtoOrders.length,
+          rtoReceivedGood,
+          rtoReceivedDamaged,
+          byCourier: Object.entries(byCourier).map(([id, v]) => ({ courierId: id, total: v.total, rto: v.rto, rtoRate: v.total > 0 ? (v.rto / v.total) * 100 : 0 })),
+        },
+        damagedStock: { totalUnits: totalDamagedUnits, totalValue: totalDamagedValue },
+        refundList,
+      });
+    } catch (error) {
+      console.error("Complaints-returns report error:", error);
+      res.status(500).json({ error: "Failed to get report" });
     }
   });
 

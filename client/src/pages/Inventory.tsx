@@ -85,6 +85,15 @@ export default function Inventory() {
       },
     },
     {
+      key: "damagedQuantity",
+      header: "Damaged",
+      sortable: true,
+      render: (v: VariantWithProduct) => {
+        const d = (v as any).damagedQuantity ?? 0;
+        return d > 0 ? <span className="font-medium text-orange-600 dark:text-orange-400">{d}</span> : <span className="text-muted-foreground">0</span>;
+      },
+    },
+    {
       key: "costPrice",
       header: "Cost",
       render: (v: VariantWithProduct) => `₹${parseFloat(v.costPrice)}`,
@@ -106,11 +115,11 @@ export default function Inventory() {
     {
       key: "type",
       header: "Type",
-      render: (m: StockMovement) => (
-        <Badge variant={m.type === "inward" ? "default" : m.type === "outward" ? "secondary" : "outline"}>
-          {m.type === "inward" ? "IN" : m.type === "outward" ? "OUT" : "ADJ"}
-        </Badge>
-      ),
+      render: (m: StockMovement) => {
+        const typeLabel = (m as any).type === "return_good" ? "Return (Good)" : (m as any).type === "damaged" ? "Damaged" : m.type === "inward" ? "IN" : m.type === "outward" ? "OUT" : "ADJ";
+        const variant = (m as any).type === "return_good" ? "default" : (m as any).type === "damaged" ? "destructive" : m.type === "inward" ? "default" : m.type === "outward" ? "secondary" : "outline";
+        return <Badge variant={variant as any}>{typeLabel}</Badge>;
+      },
     },
     { 
       key: "productVariantId", 
@@ -166,6 +175,8 @@ export default function Inventory() {
   );
   const totalUnits = allVariants.reduce((sum, v) => sum + v.stockQuantity, 0);
   const lowStockCount = allVariants.filter((v) => v.stockQuantity <= (v.lowStockThreshold || 10)).length;
+  const totalDamagedUnits = allVariants.reduce((sum, v) => sum + ((v as any).damagedQuantity ?? 0), 0);
+  const totalDamagedValue = allVariants.reduce((sum, v) => sum + ((v as any).damagedQuantity ?? 0) * parseFloat(v.costPrice), 0);
 
   const isLoading = productsLoading || movementsLoading;
 
@@ -196,7 +207,7 @@ export default function Inventory() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Total Units</p>
@@ -219,6 +230,13 @@ export default function Inventory() {
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Low Stock Alerts</p>
             <p className="text-2xl font-bold text-orange-600" data-testid="text-low-stock">{lowStockCount}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Total Damaged Stock</p>
+            <p className="text-2xl font-bold text-orange-600" data-testid="text-damaged-units">{totalDamagedUnits.toLocaleString()} units</p>
+            <p className="text-xs text-muted-foreground mt-1">₹{totalDamagedValue.toLocaleString()} value</p>
           </CardContent>
         </Card>
       </div>

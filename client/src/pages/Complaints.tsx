@@ -33,12 +33,15 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Filter, Eye, User, MessageSquare, CheckCircle, XCircle, AlertCircle, Loader2 } from "lucide-react";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Plus, Filter, Eye, User, MessageSquare, CheckCircle, XCircle, AlertCircle, Loader2, Package, RefreshCw, CreditCard } from "lucide-react";
+import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Complaint, ComplaintTimeline, OrderWithItems } from "@shared/schema";
 
 type ComplaintStatus = "open" | "in_progress" | "resolved" | "rejected" | "all";
+type ComplaintCategory = "general" | "refund" | "replacement" | "all";
 
 type ComplaintWithTimeline = Complaint & {
   timeline: ComplaintTimeline[];
@@ -48,24 +51,38 @@ type ComplaintWithTimeline = Complaint & {
 const reasonLabels: Record<string, string> = {
   wrong_item: "Wrong Item",
   damaged: "Damaged Product",
-  late_delivery: "Late Delivery",
-  size_issue: "Size Issue",
-  quality_issue: "Quality Issue",
+  delayed: "Delayed",
+  not_received: "Not Received",
+  quality: "Quality",
+  size_exchange: "Size Exchange",
   other: "Other",
+};
+
+const categoryLabels: Record<string, string> = {
+  general: "General",
+  refund: "Refund",
+  replacement: "Replacement",
 };
 
 export default function Complaints() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ComplaintStatus>("all");
+  const [categoryFilter, setCategoryFilter] = useState<ComplaintCategory>("all");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [refundDialogOpen, setRefundDialogOpen] = useState(false);
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
   const [selectedComplaint, setSelectedComplaint] = useState<ComplaintWithTimeline | null>(null);
   const [refundAmount, setRefundAmount] = useState("");
   const [newComment, setNewComment] = useState("");
+  const [receiveReturnOpen, setReceiveReturnOpen] = useState(false);
+  const [receiveReturnCondition, setReceiveReturnCondition] = useState<"good" | "damaged">("good");
+  const [receiveReturnNotes, setReceiveReturnNotes] = useState("");
+  const [processRefundOpen, setProcessRefundOpen] = useState(false);
+  const [refundForm, setRefundForm] = useState({ refundAmount: "", refundMode: "bank_transfer", refundReference: "", refundDate: new Date().toISOString().split("T")[0] });
 
   const [newTicket, setNewTicket] = useState({
+    category: "general" as "general" | "refund" | "replacement",
     orderId: "",
     reason: "",
     customReason: "",
@@ -81,13 +98,13 @@ export default function Complaints() {
   });
 
   const createComplaintMutation = useMutation({
-    mutationFn: (data: { orderId: string; reason: string; description: string }) =>
+    mutationFn: (data: { orderId: string; reason: string; description: string; category: string }) =>
       apiRequest("POST", "/api/complaints", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/complaints"] });
       toast({ title: "Ticket created successfully" });
       setCreateDialogOpen(false);
-      setNewTicket({ orderId: "", reason: "", customReason: "", description: "" });
+      setNewTicket({ category: "general", orderId: "", reason: "", customReason: "", description: "" });
     },
     onError: (error: Error) => {
       toast({ title: "Failed to create ticket", description: error.message, variant: "destructive" });
@@ -122,13 +139,58 @@ export default function Complaints() {
     },
   });
 
+  const receiveReturnMutation = useMutation({
+    mutationFn: (data: { complaintId: string; productCondition: "good" | "damaged"; returnNotes?: string }) =>
+      apiRequest("POST", `/api/complaints/${data.complaintId}/receive-return`, { productCondition: data.productCondition, returnNotes: data.returnNotes }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/complaints"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      toast({ title: "Return received and stock updated" });
+      setReceiveReturnOpen(false);
+      setReceiveReturnNotes("");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to receive return", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const createReplacementMutation = useMutation({
+    mutationFn: (complaintId: string) =>
+      apiRequest("POST", `/api/complaints/${complaintId}/create-replacement-order`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/complaints"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Replacement order created" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to create replacement order", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const processRefundMutation = useMutation({
+    mutationFn: (data: { complaintId: string; refundAmount: number; refundMode?: string; refundReference?: string; refundDate?: string }) =>
+      apiRequest("POST", `/api/complaints/${data.complaintId}/process-refund`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/complaints"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Refund processed" });
+      setProcessRefundOpen(false);
+      setRefundDialogOpen(false);
+      setDetailSheetOpen(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to process refund", description: error.message, variant: "destructive" });
+    },
+  });
+
   const filteredComplaints = complaints.filter((c) => {
     const matchesSearch =
       c.ticketNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (c.order?.orderNumber || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       (c.order?.customerName || "").toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === "all" || c.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesCategory = categoryFilter === "all" || (c as any).category === categoryFilter;
+    return matchesSearch && matchesStatus && matchesCategory;
   });
 
   const columns = [
@@ -144,6 +206,13 @@ export default function Complaints() {
       header: "Customer", 
       sortable: true,
       render: (c: ComplaintWithTimeline) => c.order?.customerName || "-",
+    },
+    {
+      key: "category",
+      header: "Category",
+      render: (c: ComplaintWithTimeline) => (
+        <Badge variant="outline">{categoryLabels[(c as any).category] || "General"}</Badge>
+      ),
     },
     {
       key: "reason",
@@ -238,6 +307,7 @@ export default function Complaints() {
       orderId: newTicket.orderId,
       reason: newTicket.reason,
       description,
+      category: newTicket.category,
     });
   };
 
@@ -319,7 +389,7 @@ export default function Complaints() {
         </Card>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-4">
+      <div className="flex flex-col lg:flex-row gap-4 flex-wrap">
         <SearchInput
           placeholder="Search tickets, orders, customers..."
           value={searchQuery}
@@ -340,6 +410,20 @@ export default function Complaints() {
             <SelectItem value="in_progress">In Progress ({statusCounts.in_progress})</SelectItem>
             <SelectItem value="resolved">Resolved ({statusCounts.resolved})</SelectItem>
             <SelectItem value="rejected">Rejected ({statusCounts.rejected})</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={categoryFilter}
+          onValueChange={(v) => setCategoryFilter(v as ComplaintCategory)}
+        >
+          <SelectTrigger className="w-full lg:w-44" data-testid="select-complaint-category">
+            <SelectValue placeholder="Category" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Categories</SelectItem>
+            <SelectItem value="general">General</SelectItem>
+            <SelectItem value="refund">Refund</SelectItem>
+            <SelectItem value="replacement">Replacement</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -364,9 +448,12 @@ export default function Complaints() {
           {selectedComplaint && (
             <>
               <SheetHeader>
-                <SheetTitle className="flex items-center justify-between">
+                <SheetTitle className="flex items-center justify-between gap-2 flex-wrap">
                   <span>{selectedComplaint.ticketNumber}</span>
-                  <StatusBadge status={selectedComplaint.status} />
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">{categoryLabels[(selectedComplaint as any).category] || "General"}</Badge>
+                    <StatusBadge status={selectedComplaint.status} />
+                  </div>
                 </SheetTitle>
               </SheetHeader>
 
@@ -397,6 +484,99 @@ export default function Complaints() {
                     </div>
                   )}
                 </div>
+
+                {((selectedComplaint as any).category === "replacement" || (selectedComplaint as any).category === "refund") && (
+                  <>
+                    <Separator />
+                    <div>
+                      <h3 className="text-sm font-semibold text-muted-foreground mb-3">WORKFLOW</h3>
+                      <div className="space-y-4">
+                        <div className="flex gap-2 items-start">
+                          <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                          <div>
+                            <p className="font-medium text-sm">Step 1: Complaint Registered</p>
+                            <p className="text-xs text-muted-foreground">Done on creation</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 items-start">
+                          {(selectedComplaint as any).returnReceivedBy ? (
+                            <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                          ) : (
+                            <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+                          )}
+                          <div className="flex-1">
+                            <p className="font-medium text-sm">Step 2: Receive Product</p>
+                            {(selectedComplaint as any).returnReceivedBy ? (
+                              <p className="text-xs text-muted-foreground">
+                                Received — Condition: <Badge variant={(selectedComplaint as any).returnProductCondition === "good" ? "default" : "destructive"} className="text-xs">{(selectedComplaint as any).returnProductCondition === "good" ? "Good" : "Damaged"}</Badge>
+                              </p>
+                            ) : (
+                              <Button size="sm" className="mt-1" onClick={() => setReceiveReturnOpen(true)} data-testid="button-receive-return">
+                                <Package className="h-3 w-3 mr-1" />
+                                Receive Return
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                        {(selectedComplaint as any).category === "replacement" && (
+                          <div className="flex gap-2 items-start">
+                            {(selectedComplaint as any).replacementOrderId ? (
+                              <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                            ) : (
+                              <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+                            )}
+                            <div className="flex-1">
+                              <p className="font-medium text-sm">Step 3: Replacement Order</p>
+                              {(selectedComplaint as any).replacementOrderId ? (
+                                <Link href="/orders">
+                                  <Button size="sm" variant="link" className="p-0 h-auto text-primary">View replacement order in Orders →</Button>
+                                </Link>
+                              ) : (
+                                <Button size="sm" className="mt-1" onClick={() => selectedComplaint && createReplacementMutation.mutate(selectedComplaint.id)} disabled={!(selectedComplaint as any).returnReceivedBy || createReplacementMutation.isPending} data-testid="button-create-replacement">
+                                  <RefreshCw className="h-3 w-3 mr-1" />
+                                  {createReplacementMutation.isPending ? "Creating…" : "Create Replacement Order"}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {(selectedComplaint as any).category === "refund" && (
+                          <div className="flex gap-2 items-start">
+                            {(selectedComplaint as any).refundProcessedBy ? (
+                              <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                            ) : (
+                              <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+                            )}
+                            <div className="flex-1">
+                              <p className="font-medium text-sm">Step 3: Process Refund</p>
+                              {(selectedComplaint as any).refundProcessedBy ? (
+                                <p className="text-xs text-muted-foreground">
+                                  ₹{(selectedComplaint as any).refundAmount} via {(selectedComplaint as any).refundMode} — Ref: {(selectedComplaint as any).refundReference || "—"}
+                                </p>
+                              ) : (
+                                <Button size="sm" className="mt-1" onClick={() => { setRefundForm({ ...refundForm, refundAmount: selectedComplaint.order?.totalAmount ? String(selectedComplaint.order.totalAmount) : "" }); setProcessRefundOpen(true); }} disabled={!(selectedComplaint as any).returnReceivedBy || processRefundMutation.isPending} data-testid="button-process-refund">
+                                  <CreditCard className="h-3 w-3 mr-1" />
+                                  Process Refund
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex gap-2 items-start">
+                          {selectedComplaint.status === "resolved" || selectedComplaint.status === "rejected" ? (
+                            <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                          ) : (
+                            <div className="w-4 h-4 rounded-full border-2 border-muted mt-0.5 shrink-0" />
+                          )}
+                          <div>
+                            <p className="font-medium text-sm">Step 4: Resolved</p>
+                            <p className="text-xs text-muted-foreground">{selectedComplaint.status === "resolved" ? "Complaint resolved" : selectedComplaint.status === "rejected" ? "Rejected" : "Pending"}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {selectedComplaint.resolutionType && (
                   <>
@@ -509,6 +689,85 @@ export default function Complaints() {
         </SheetContent>
       </Sheet>
 
+      <Dialog open={receiveReturnOpen} onOpenChange={setReceiveReturnOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Receive Return</DialogTitle>
+            <DialogDescription>Record product condition when receiving the return for {selectedComplaint?.ticketNumber}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Product condition</Label>
+              <RadioGroup value={receiveReturnCondition} onValueChange={(v: "good" | "damaged") => setReceiveReturnCondition(v)} className="flex gap-4">
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="good" id="cond-good" />
+                  <Label htmlFor="cond-good" className="font-normal">Good</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="damaged" id="cond-damaged" />
+                  <Label htmlFor="cond-damaged" className="font-normal">Damaged</Label>
+                </div>
+              </RadioGroup>
+            </div>
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea value={receiveReturnNotes} onChange={(e) => setReceiveReturnNotes(e.target.value)} placeholder="Condition notes..." />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReceiveReturnOpen(false)}>Cancel</Button>
+            <Button onClick={() => selectedComplaint && receiveReturnMutation.mutate({ complaintId: selectedComplaint.id, productCondition: receiveReturnCondition, returnNotes: receiveReturnNotes || undefined })} disabled={receiveReturnMutation.isPending}>
+              {receiveReturnMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Confirm Received
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={processRefundOpen} onOpenChange={setProcessRefundOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Process Refund</DialogTitle>
+            <DialogDescription>Record refund details for {selectedComplaint?.ticketNumber}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Refund amount (₹)</Label>
+              <Input type="number" value={refundForm.refundAmount} onChange={(e) => setRefundForm((p) => ({ ...p, refundAmount: e.target.value }))} placeholder="Amount" />
+            </div>
+            <div className="space-y-2">
+              <Label>Refund mode</Label>
+              <Select value={refundForm.refundMode} onValueChange={(v) => setRefundForm((p) => ({ ...p, refundMode: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="upi">UPI</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="card">Card</SelectItem>
+                  <SelectItem value="cheque">Cheque</SelectItem>
+                  <SelectItem value="original_payment_method">Original payment method</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Reference number</Label>
+              <Input value={refundForm.refundReference} onChange={(e) => setRefundForm((p) => ({ ...p, refundReference: e.target.value }))} placeholder="Transaction reference" />
+            </div>
+            <div className="space-y-2">
+              <Label>Refund date</Label>
+              <Input type="date" value={refundForm.refundDate} onChange={(e) => setRefundForm((p) => ({ ...p, refundDate: e.target.value }))} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProcessRefundOpen(false)}>Cancel</Button>
+            <Button onClick={() => selectedComplaint && processRefundMutation.mutate({ complaintId: selectedComplaint.id, refundAmount: parseFloat(refundForm.refundAmount) || 0, refundMode: refundForm.refundMode, refundReference: refundForm.refundReference || undefined, refundDate: refundForm.refundDate })} disabled={!refundForm.refundAmount || processRefundMutation.isPending}>
+              {processRefundMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Process Refund
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent data-testid="modal-create-ticket">
           <DialogHeader>
@@ -516,6 +775,31 @@ export default function Complaints() {
             <DialogDescription>Create a support ticket for a customer complaint</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Complaint Category</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {(["general", "refund", "replacement"] as const).map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setNewTicket((p) => ({ ...p, category: cat }))}
+                    className={`p-3 rounded-lg border-2 text-left text-sm font-medium transition-colors ${
+                      newTicket.category === cat
+                        ? "border-primary bg-primary/10"
+                        : "border-muted hover:border-muted-foreground/50"
+                    }`}
+                    data-testid={`ticket-category-${cat}`}
+                  >
+                    {categoryLabels[cat]}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {newTicket.category === "general" && "Record a general complaint and post action taken."}
+                {newTicket.category === "refund" && "Customer will return product → receive and inspect → process refund."}
+                {newTicket.category === "replacement" && "Customer will return product → receive and inspect → send replacement."}
+              </p>
+            </div>
             <div className="space-y-2">
               <Label>Order</Label>
               <Select
@@ -546,9 +830,10 @@ export default function Complaints() {
                 <SelectContent>
                   <SelectItem value="wrong_item">Wrong Item</SelectItem>
                   <SelectItem value="damaged">Damaged Product</SelectItem>
-                  <SelectItem value="late_delivery">Late Delivery</SelectItem>
-                  <SelectItem value="size_issue">Size Issue</SelectItem>
-                  <SelectItem value="quality_issue">Quality Issue</SelectItem>
+                  <SelectItem value="delayed">Delayed</SelectItem>
+                  <SelectItem value="not_received">Not Received</SelectItem>
+                  <SelectItem value="quality">Quality</SelectItem>
+                  <SelectItem value="size_exchange">Size Exchange</SelectItem>
                   <SelectItem value="other">Other</SelectItem>
                 </SelectContent>
               </Select>

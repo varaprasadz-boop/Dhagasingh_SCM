@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -70,6 +71,23 @@ export default function Reports() {
     queryKey: ["/api/complaints"],
   });
 
+  const [complaintsReportRange, setComplaintsReportRange] = useState("30");
+  const fromDate = (() => {
+    const d = new Date();
+    const n = parseInt(complaintsReportRange, 10) || 30;
+    d.setDate(d.getDate() - n);
+    return d.toISOString().split("T")[0];
+  })();
+  const toDate = new Date().toISOString().split("T")[0];
+  const { data: complaintsReturnsReport } = useQuery<any>({
+    queryKey: ["/api/reports/complaints-returns", fromDate, toDate],
+    queryFn: async () => {
+      const res = await fetch(`/api/reports/complaints-returns?fromDate=${encodeURIComponent(fromDate)}&toDate=${encodeURIComponent(toDate)}`, { credentials: "include" });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+  });
+
   const totalOrderValue = orders.reduce((sum, o) => sum + parseFloat(o.totalAmount || "0"), 0);
   const avgOrderValue = orders.length > 0 ? totalOrderValue / orders.length : 0;
   const codOrders = orders.filter((o) => o.paymentMethod === "cod").length;
@@ -135,6 +153,7 @@ export default function Reports() {
           <TabsTrigger value="orders">Orders</TabsTrigger>
           <TabsTrigger value="inventory">Inventory</TabsTrigger>
           <TabsTrigger value="delivery">Delivery</TabsTrigger>
+          <TabsTrigger value="complaints-returns">Complaints & Returns</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6 mt-6">
@@ -390,6 +409,173 @@ export default function Reports() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="complaints-returns" className="space-y-6 mt-6">
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-muted-foreground">Date range:</span>
+            <Select value={complaintsReportRange} onValueChange={setComplaintsReportRange}>
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7">Last 7 days</SelectItem>
+                <SelectItem value="30">Last 30 days</SelectItem>
+                <SelectItem value="90">Last 90 days</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {complaintsReturnsReport && (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                <Card>
+                  <CardContent className="pt-6">
+                    <p className="text-sm text-muted-foreground">Total Complaints</p>
+                    <p className="text-2xl font-bold">{complaintsReturnsReport.complaintSummary?.total ?? 0}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-6">
+                    <p className="text-sm text-muted-foreground">Resolution Rate</p>
+                    <p className="text-2xl font-bold">{(complaintsReturnsReport.complaintSummary?.resolutionRate ?? 0).toFixed(1)}%</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-6">
+                    <p className="text-sm text-muted-foreground">Avg Resolution (days)</p>
+                    <p className="text-2xl font-bold">{(complaintsReturnsReport.complaintSummary?.avgResolutionDays ?? 0).toFixed(1)}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-6">
+                    <p className="text-sm text-muted-foreground">Total Refund Amount</p>
+                    <p className="text-2xl font-bold">₹{(complaintsReturnsReport.complaintSummary?.totalRefundAmount ?? 0).toLocaleString()}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-6">
+                    <p className="text-sm text-muted-foreground">Replacements Sent</p>
+                    <p className="text-2xl font-bold">{complaintsReturnsReport.complaintSummary?.totalReplacements ?? 0}</p>
+                  </CardContent>
+                </Card>
+              </div>
+              <div className="grid lg:grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Complaints by Category</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {["general", "refund", "replacement"].map((cat) => (
+                        <div key={cat} className="flex justify-between text-sm">
+                          <span className="capitalize">{cat}</span>
+                          <span className="font-medium">{complaintsReturnsReport.byCategory?.[cat] ?? 0}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Return Product Condition</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span>Good</span>
+                        <span className="font-medium text-green-600">{complaintsReturnsReport.returnCondition?.good ?? 0}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span>Damaged</span>
+                        <span className="font-medium text-orange-600">{complaintsReturnsReport.returnCondition?.damaged ?? 0}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+              <div className="grid lg:grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Complaints by Reason</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {(complaintsReturnsReport.byReason ?? []).map(({ reason, count }: { reason: string; count: number }) => (
+                        <div key={reason} className="flex justify-between text-sm">
+                          <span>{reason.replace(/_/g, " ")}</span>
+                          <span className="font-medium">{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Damaged Stock Summary</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">Total damaged units</p>
+                    <p className="text-2xl font-bold text-orange-600">{complaintsReturnsReport.damagedStock?.totalUnits ?? 0}</p>
+                    <p className="text-sm text-muted-foreground mt-2">Value at cost</p>
+                    <p className="text-xl font-bold">₹{(complaintsReturnsReport.damagedStock?.totalValue ?? 0).toLocaleString()}</p>
+                  </CardContent>
+                </Card>
+              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">RTO Analysis</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total RTO orders</p>
+                      <p className="text-xl font-bold">{complaintsReturnsReport.rtoAnalysis?.totalRto ?? 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">RTO received — Good</p>
+                      <p className="text-xl font-bold text-green-600">{complaintsReturnsReport.rtoAnalysis?.rtoReceivedGood ?? 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">RTO received — Damaged</p>
+                      <p className="text-xl font-bold text-orange-600">{complaintsReturnsReport.rtoAnalysis?.rtoReceivedDamaged ?? 0}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Refund Report</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left py-2">Order #</th>
+                          <th className="text-right py-2">Amount</th>
+                          <th className="text-left py-2">Mode</th>
+                          <th className="text-left py-2">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(complaintsReturnsReport.refundList ?? []).map((r: any, i: number) => (
+                          <tr key={i} className="border-b">
+                            <td className="py-2 font-mono">{r.orderNumber}</td>
+                            <td className="text-right py-2">₹{r.amount?.toLocaleString()}</td>
+                            <td className="py-2">{r.mode}</td>
+                            <td className="py-2">{r.date}</td>
+                          </tr>
+                        ))}
+                        {(complaintsReturnsReport.refundList ?? []).length === 0 && (
+                          <tr><td colSpan={4} className="py-4 text-center text-muted-foreground">No refunds in period</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </TabsContent>
       </Tabs>
     </div>
