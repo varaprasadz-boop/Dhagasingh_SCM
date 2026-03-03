@@ -82,7 +82,7 @@ const statusFlow = [
   "dispatched",
   "delivered",
   "closed",
-  "completed",
+  "cancelled",
 ];
 
 const paymentStatusLabels: Record<string, string> = {
@@ -408,13 +408,16 @@ export default function B2BOrderDetail() {
         <CardContent>
           <div className="flex gap-1 overflow-x-auto pb-2">
             {statusFlow.map((status, index) => {
-              const isCompleted = index < currentStatusIndex;
+              const isCompleted = status !== "cancelled" && index < currentStatusIndex;
               const isCurrent = index === currentStatusIndex;
+              const isCancelled = status === "cancelled" && isCurrent;
               return (
                 <div
                   key={status}
                   className={`flex-1 min-w-[100px] p-2 rounded text-center text-xs ${
-                    isCompleted
+                    isCancelled
+                      ? "bg-red-100 text-red-800"
+                      : isCompleted
                       ? "bg-green-100 text-green-800"
                       : isCurrent
                       ? "bg-primary text-primary-foreground"

@@ -216,6 +216,14 @@ export default function B2BOrderCreate() {
     return undefined;
   };
 
+  /** Normalize stock from API (handles camelCase, snake_case, and string numbers). */
+  const getStockQty = (v: ProductVariant | undefined): number => {
+    if (!v) return 0;
+    const raw = (v as Record<string, unknown>).stockQuantity ?? (v as Record<string, unknown>).stock_quantity;
+    const n = typeof raw === "number" ? raw : Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  };
+
   const validateStockQuantities = (): { valid: boolean; errors: string[] } => {
     const items = form.watch("items") || [];
     const errors: string[] = [];
@@ -224,8 +232,9 @@ export default function B2BOrderCreate() {
       const item = items[i];
       if (item.productVariantId && item.quantity) {
         const variant = getVariantById(item.productVariantId);
-        if (variant && item.quantity > variant.stockQuantity) {
-          errors.push(`Item ${i + 1}: Quantity (${item.quantity}) exceeds available stock (${variant.stockQuantity})`);
+        const available = getStockQty(variant);
+        if (variant && item.quantity > available) {
+          errors.push(`Item ${i + 1}: Quantity (${item.quantity}) exceeds available stock (${available})`);
         }
       }
     }
@@ -579,21 +588,23 @@ export default function B2BOrderCreate() {
                                           </SelectTrigger>
                                         </FormControl>
                                         <SelectContent>
-                                          {variants.map((v) => (
+                                          {variants.map((v) => {
+                                            const qty = getStockQty(v);
+                                            return (
                                             <SelectItem 
                                               key={v.id} 
                                               value={v.id}
-                                              disabled={v.stockQuantity === 0}
-                                              className={v.stockQuantity === 0 ? "text-muted-foreground opacity-50" : ""}
+                                              disabled={qty === 0}
+                                              className={qty === 0 ? "text-muted-foreground opacity-50" : ""}
                                             >
                                               {v.color && v.size
                                                 ? `${v.color} - ${v.size}`
                                                 : v.color || v.size || v.sku}
-                                              {v.stockQuantity === 0 
+                                              {qty === 0 
                                                 ? " (Out of stock)" 
-                                                : ` (${v.stockQuantity} in stock)`}
+                                                : ` (${qty} in stock)`}
                                             </SelectItem>
-                                          ))}
+                                          );})}
                                         </SelectContent>
                                       </Select>
                                       <FormMessage />
@@ -607,7 +618,8 @@ export default function B2BOrderCreate() {
                                   render={({ field: f }) => {
                                     const selectedVariantId = form.watch(`items.${index}.productVariantId`);
                                     const selectedVariant = selectedVariantId ? getVariantById(selectedVariantId) : undefined;
-                                    const exceeds = selectedVariant && f.value > selectedVariant.stockQuantity;
+                                    const maxStock = getStockQty(selectedVariant);
+                                    const exceeds = selectedVariant && f.value > maxStock;
                                     
                                     return (
                                       <FormItem>
@@ -621,7 +633,7 @@ export default function B2BOrderCreate() {
                                           <Input
                                             type="number"
                                             min={1}
-                                            max={selectedVariant?.stockQuantity}
+                                            max={maxStock || undefined}
                                             {...f}
                                             className={exceeds ? "border-red-500 focus:border-red-500" : ""}
                                             data-testid={`input-quantity-${index}`}
@@ -629,7 +641,7 @@ export default function B2BOrderCreate() {
                                         </FormControl>
                                         {selectedVariant && (
                                           <p className={`text-xs ${exceeds ? "text-red-500" : "text-muted-foreground"}`}>
-                                            Max available: {selectedVariant.stockQuantity}
+                                            Max available: {maxStock}
                                           </p>
                                         )}
                                         <FormMessage />
