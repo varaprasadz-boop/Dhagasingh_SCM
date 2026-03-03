@@ -124,9 +124,33 @@ export default function Orders() {
     return { available: 0, inStock: false };
   };
 
+  const findVariantByProductNameColorSize = (item: Record<string, unknown>): { stockQuantity: number } | null => {
+    const productName = ((item.productName ?? item.product_name ?? "") as string).trim().toLowerCase();
+    const color = ((item.color ?? "") as string).trim().toLowerCase();
+    const size = ((item.size ?? "") as string).trim().toLowerCase();
+    if (!productName) return null;
+    for (const product of products) {
+      const productNameNorm = (product.name || "").trim().toLowerCase();
+      const nameMatches = productNameNorm && (productName.includes(productNameNorm) || productNameNorm.includes(productName));
+      if (!nameMatches) continue;
+      for (const v of product.variants || []) {
+        const vColor = ((v as Record<string, unknown>).color ?? "").toString().trim().toLowerCase();
+        const vSize = ((v as Record<string, unknown>).size ?? "").toString().trim().toLowerCase();
+        const colorMatch = !color || vColor === color;
+        const sizeMatch = !size || vSize === size;
+        if (colorMatch && sizeMatch) {
+          const qty = getVariantStock(v);
+          return { stockQuantity: qty };
+        }
+      }
+    }
+    return null;
+  };
+
   const getStockForItem = (item: { sku?: string; productVariantId?: string | null }): { available: number; inStock: boolean } => {
     const raw = item as Record<string, unknown>;
     const variantId = (raw.productVariantId ?? raw.product_variant_id) as string | undefined;
+    const sku = (raw.sku ?? raw.variant_sku ?? "") as string;
     if (variantId) {
       for (const product of products) {
         const variant = product.variants.find((v) => v.id === variantId);
@@ -136,8 +160,14 @@ export default function Orders() {
         }
       }
     }
-    const sku = (raw.sku ?? raw.variant_sku ?? "") as string;
-    return getStockForSku(sku);
+    const bySku = getStockForSku(sku);
+    if (bySku.available > 0) return bySku;
+    const byAttrs = findVariantByProductNameColorSize(raw);
+    if (byAttrs) {
+      const qty = byAttrs.stockQuantity;
+      return { available: qty, inStock: qty > 0 };
+    }
+    return bySku;
   };
 
   const checkAllItemsInStock = (order: OrderWithItems): boolean => {
