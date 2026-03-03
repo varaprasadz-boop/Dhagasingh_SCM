@@ -104,6 +104,11 @@ export default function Orders() {
     }
   }, [detailSheetOpen, selectedOrder?.id, refetchProducts]);
 
+  const getVariantStock = (v: { stockQuantity?: number; stock_quantity?: number }): number => {
+    const qty = v.stockQuantity ?? (v as Record<string, unknown>).stock_quantity;
+    return Number(qty) ?? 0;
+  };
+
   const getStockForSku = (sku: string): { available: number; inStock: boolean } => {
     const skuNorm = (sku || "").trim().toLowerCase();
     if (!skuNorm) return { available: 0, inStock: false };
@@ -112,17 +117,33 @@ export default function Orders() {
         (v) => (v.sku || "").trim().toLowerCase() === skuNorm
       );
       if (variant) {
-        const qty = Number(variant.stockQuantity) ?? 0;
+        const qty = getVariantStock(variant);
         return { available: qty, inStock: qty > 0 };
       }
     }
     return { available: 0, inStock: false };
   };
 
+  const getStockForItem = (item: { sku?: string; productVariantId?: string | null }): { available: number; inStock: boolean } => {
+    const raw = item as Record<string, unknown>;
+    const variantId = (raw.productVariantId ?? raw.product_variant_id) as string | undefined;
+    if (variantId) {
+      for (const product of products) {
+        const variant = product.variants.find((v) => v.id === variantId);
+        if (variant) {
+          const qty = getVariantStock(variant);
+          return { available: qty, inStock: qty > 0 };
+        }
+      }
+    }
+    const sku = (raw.sku ?? raw.variant_sku ?? "") as string;
+    return getStockForSku(sku);
+  };
+
   const checkAllItemsInStock = (order: OrderWithItems): boolean => {
     if (!order.items || order.items.length === 0) return false;
     return order.items.every((item) => {
-      const stock = getStockForSku(item.sku);
+      const stock = getStockForItem(item);
       return stock.available >= item.quantity;
     });
   };
@@ -553,7 +574,7 @@ export default function Orders() {
                   <h3 className="text-sm font-semibold text-muted-foreground mb-2">ORDER ITEMS</h3>
                   <div className="space-y-2">
                     {selectedOrder.items?.map((item, idx) => {
-                      const stock = getStockForSku(item.sku);
+                      const stock = getStockForItem(item);
                       const hasEnoughStock = stock.available >= item.quantity;
                       return (
                         <div key={idx} className="flex items-center justify-between p-2 bg-muted rounded-md">
