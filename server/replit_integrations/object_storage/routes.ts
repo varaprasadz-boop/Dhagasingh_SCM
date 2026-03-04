@@ -10,6 +10,9 @@ const ALLOWED_MIME_TYPES = [
   "image/png",
   "image/gif",
   "image/webp",
+  "image/svg+xml",
+  "image/bmp",
+  "image/x-icon",
   "application/pdf",
 ];
 
@@ -28,11 +31,11 @@ const upload = multer({
 });
 
 export function registerObjectStorageRoutes(app: Express): void {
-  const objectStorageService = new ObjectStorageService();
   const storageMode = fileStorageService.getMode();
   const uploadsDir = process.env.UPLOADS_DIR || path.join(process.cwd(), "uploads");
+  const objectStorageService = storageMode === "replit" ? new ObjectStorageService() : null;
 
-  console.log(`[Object Storage] Registering routes in ${storageMode} mode`);
+  console.log(`[Object Storage] Registering routes in ${storageMode} mode (VPS local storage when mode is "local")`);
   console.log(`[Object Storage] Uploads directory: ${uploadsDir}`);
 
   app.use("/uploads", express.static(uploadsDir));
@@ -59,6 +62,9 @@ export function registerObjectStorageRoutes(app: Express): void {
           "image/png": ".png",
           "image/gif": ".gif",
           "image/webp": ".webp",
+          "image/svg+xml": ".svg",
+          "image/bmp": ".bmp",
+          "image/x-icon": ".ico",
           "application/pdf": ".pdf",
         };
         const ext = mimeToExt[contentType] || path.extname(name) || ".bin";
@@ -78,11 +84,11 @@ export function registerObjectStorageRoutes(app: Express): void {
       console.log("[Object Storage] PRIVATE_OBJECT_DIR set:", !!privateDir);
       console.log("[Object Storage] DEFAULT_OBJECT_STORAGE_BUCKET_ID set:", !!bucketId);
 
-      if (!privateDir) {
-        console.error("[Object Storage] PRIVATE_OBJECT_DIR not configured");
+      if (!privateDir || !objectStorageService) {
+        console.error("[Object Storage] Replit storage not configured (use FILE_STORAGE_MODE=local on VPS)");
         return res.status(503).json({
           error: "Object storage not configured",
-          details: "PRIVATE_OBJECT_DIR environment variable is not set. Please configure object storage in the Replit tools panel.",
+          details: "On VPS set FILE_STORAGE_MODE=local and do not set Replit env vars. See docs/SETUP_VPS_STORAGE.md",
         });
       }
 
@@ -105,20 +111,31 @@ export function registerObjectStorageRoutes(app: Express): void {
       let errorMessage = "Failed to generate upload URL";
       let details = error?.message || "Unknown error";
       
-      if (error?.message?.includes("PRIVATE_OBJECT_DIR")) {
+      if (error?.message?.includes("PRIVATE_OBJECT_DIR") || !objectStorageService) {
         errorMessage = "Object storage not configured";
-        details = "Please configure object storage in the Replit tools panel.";
+        details = "On VPS use FILE_STORAGE_MODE=local. See docs/SETUP_VPS_STORAGE.md";
       } else if (error?.code === "ECONNREFUSED" || error?.message?.includes("127.0.0.1:1106")) {
         errorMessage = "Object storage service unavailable";
-        details = "The storage sidecar service is not running. This may happen in deployed environments.";
+        details = "Replit sidecar not running. On VPS use FILE_STORAGE_MODE=local.";
       }
       
       res.status(500).json({ error: errorMessage, details });
     }
   });
 
-  // POST for multipart form uploads  
-  app.post("/api/uploads/file", upload.single("file"), async (req, res) => {
+  // POST for multipart form uploads (multer errors caught and returned as 400 JSON)
+  app.post(
+    "/api/uploads/file",
+    (req, res, next) => {
+      upload.single("file")(req, res, (err: unknown) => {
+        if (err) {
+          const message = err instanceof Error ? err.message : "File upload rejected";
+          return res.status(400).json({ error: message });
+        }
+        next();
+      });
+    },
+    async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file provided" });
@@ -136,9 +153,12 @@ export function registerObjectStorageRoutes(app: Express): void {
         // In local mode without objectPath, generate path with extension from mimetype
         const mimeToExt: Record<string, string> = {
           "image/jpeg": ".jpg",
-          "image/png": ".png", 
+          "image/png": ".png",
           "image/gif": ".gif",
           "image/webp": ".webp",
+          "image/svg+xml": ".svg",
+          "image/bmp": ".bmp",
+          "image/x-icon": ".ico",
           "application/pdf": ".pdf",
         };
         const ext = mimeToExt[req.file.mimetype] || path.extname(req.file.originalname) || ".bin";
@@ -234,24 +254,29 @@ export function registerObjectStorageRoutes(app: Express): void {
     }
   });
 
-  app.get("/objects/:objectPath(*)", async (req, res) => {
-    try {
-      const objectFile = await objectStorageService.getObjectEntityFile(req.path);
-      await objectStorageService.downloadObject(objectFile, res);
-    } catch (error) {
-      console.error("Error serving object:", error);
-      if (error instanceof ObjectNotFoundError) {
-        return res.status(404).json({ error: "Object not found" });
+  // Replit-only: serve objects from Replit Object Storage. On VPS (local mode) files are under /uploads/
+  if (objectStorageService) {
+    app.get("/objects/:objectPath(*)", async (req, res) => {
+      try {
+        const objectFile = await objectStorageService.getObjectEntityFile(req.path);
+        await objectStorageService.downloadObject(objectFile, res);
+      } catch (error) {
+        console.error("Error serving object:", error);
+        if (error instanceof ObjectNotFoundError) {
+          return res.status(404).json({ error: "Object not found" });
+        }
+        return res.status(500).json({ error: "Failed to serve object" });
       }
-      return res.status(500).json({ error: "Failed to serve object" });
-    }
-  });
+    });
+  }
 
   app.get("/api/uploads/storage-info", (_req, res) => {
+    const mode = fileStorageService.getMode();
     res.json({
-      mode: fileStorageService.getMode(),
+      mode,
       localSupported: true,
-      replitSupported: !!process.env.PRIVATE_OBJECT_DIR,
+      replitSupported: !!process.env.PRIVATE_OBJECT_DIR && !!process.env.REPL_ID,
+      vpsStorage: mode === "local",
     });
   });
 }

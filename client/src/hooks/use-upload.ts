@@ -11,6 +11,7 @@ interface UploadResponse {
   uploadURL: string;
   objectPath: string;
   metadata: UploadMetadata;
+  /** "local" = VPS/filesystem storage; "replit" = Replit Object Storage */
   mode?: "local" | "replit";
   category?: string;
 }
@@ -30,6 +31,7 @@ export function useUpload(options: UseUploadOptions = {}) {
     async (file: File, category?: string): Promise<UploadResponse> => {
       const response = await fetch("/api/uploads/request-url", {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
@@ -43,7 +45,8 @@ export function useUpload(options: UseUploadOptions = {}) {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to get upload URL");
+        const msg = errorData.error ?? errorData.message ?? errorData.details ?? "Failed to get upload URL";
+        throw new Error(typeof msg === "string" ? msg : "Failed to get upload URL");
       }
 
       return response.json();
@@ -67,6 +70,7 @@ export function useUpload(options: UseUploadOptions = {}) {
       
       const response = await fetch(finalUrl, {
         method: "PUT",
+        credentials: "include",
         body: file,
         headers: {
           "Content-Type": file.type || "application/octet-stream",
@@ -91,12 +95,14 @@ export function useUpload(options: UseUploadOptions = {}) {
 
       const response = await fetch("/api/uploads/file", {
         method: "POST",
+        credentials: "include",
         body: formData,
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to upload file");
+        const msg = errorData.error ?? errorData.message ?? errorData.details ?? "Failed to upload file";
+        throw new Error(typeof msg === "string" ? msg : "Failed to upload file");
       }
 
       return response.json();
@@ -151,6 +157,7 @@ export function useUpload(options: UseUploadOptions = {}) {
     }> => {
       const response = await fetch("/api/uploads/request-url", {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },

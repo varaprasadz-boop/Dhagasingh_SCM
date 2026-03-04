@@ -47,16 +47,17 @@ export class FileStorageService {
     console.log(`[FileStorage] Initialized in ${this.mode} mode`);
   }
 
+  /** On VPS (no REPL_ID), always use local. Set FILE_STORAGE_MODE=local and see docs/SETUP_VPS_STORAGE.md */
   private detectStorageMode(): StorageMode {
     const hasReplitConfig = !!(
       process.env.PRIVATE_OBJECT_DIR &&
       process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID
     );
-    
+
     if (hasReplitConfig && process.env.REPL_ID) {
       return "replit";
     }
-    
+
     return "local";
   }
 

@@ -87,13 +87,15 @@ The B2B order creation uses a dedicated landing page (`/b2b/orders/new`) with a 
 ### File Storage Configuration (Production Deployment)
 The system supports two storage modes for file uploads (payment proofs, artwork):
 
-**Auto-Detection**: The system automatically detects the environment:
-- **Replit**: Uses Object Storage (presigned URLs) when running on Replit
-- **Local/VPS**: Uses local file system storage when deployed to Hostinger VPS or similar
+**VPS deployment (recommended)**: Use local filesystem storage. See **[docs/SETUP_VPS_STORAGE.md](docs/SETUP_VPS_STORAGE.md)** for full setup (env vars, directory creation, Nginx, backups).
+
+**Auto-Detection**: When not forcing a mode:
+- **Replit**: Uses Object Storage (presigned URLs) when running on Replit (`REPL_ID` set)
+- **Local/VPS**: Uses local file system storage (no `REPL_ID`)
 
 **Environment Variables**:
-- `FILE_STORAGE_MODE`: Force storage mode (`local`, `replit`, or `auto` - default)
-- `UPLOADS_DIR`: Custom uploads directory path (default: `./uploads`)
+- `FILE_STORAGE_MODE`: Force storage mode (`local`, `replit`, or `auto` - default). On VPS set `local`.
+- `UPLOADS_DIR`: Custom uploads directory path (default: `./uploads`). Use an absolute path on VPS.
 - `BASE_URL`: Base URL for the application (used in local mode)
 
 **Local Storage Structure**:
