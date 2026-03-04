@@ -95,7 +95,7 @@ const paymentStatusLabels: Record<string, string> = {
 export default function B2BOrderDetail() {
   const params = useParams<{ id: string }>();
   const { toast } = useToast();
-  const { hasPermission, isSuperAdmin } = useAuth();
+  const { hasPermission, isSuperAdmin, user } = useAuth();
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [newStatus, setNewStatus] = useState("");
@@ -534,6 +534,83 @@ export default function B2BOrderDetail() {
           </CardContent>
         </Card>
       </div>
+
+      {isSuperAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <IndianRupee className="h-5 w-5" />
+              Profitability
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {order.paymentStatus === "fully_paid" && (order.status === "delivered" || order.status === "closed") && order.commissionStatus === "earned" ? (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Total Order Value:</span>
+                  <span className="font-medium">{formatCurrency(order.totalAmount)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Product Cost:</span>
+                  <span>{formatCurrency((order as { productCost?: string })?.productCost ?? "0")}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Sales Agent:</span>
+                  <span className="text-sm">
+                    {order.createdByUser?.name ?? "—"}
+                    {order.createdByUser && (() => {
+                      const u = order.createdByUser as { commissionType?: string; commissionValue?: string; commissionMode?: string };
+                      const totalQty = (order.items ?? []).reduce((s: number, i: { quantity?: number }) => s + (i.quantity ?? 0), 0);
+                      const total = parseFloat(String(order.totalAmount)) || 0;
+                      if (u.commissionType === "per_piece" && u.commissionValue != null) {
+                        return ` — ₹${u.commissionValue}/pc × ${totalQty} pcs`;
+                      }
+                      if (u.commissionType === "per_order" && u.commissionValue != null) {
+                        if (u.commissionMode === "percentage") return ` — ${u.commissionValue}% of ${formatCurrency(total)}`;
+                        return ` — ₹${u.commissionValue} per order`;
+                      }
+                      return "";
+                    })()}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Sales Agent Commission:</span>
+                  <span>{formatCurrency((order as { salesAgentCommission?: string })?.salesAgentCommission ?? "0")}</span>
+                </div>
+                <Separator />
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Earning:</span>
+                  <span className={`font-semibold ${parseFloat(String((order as { earning?: string })?.earning ?? 0)) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                    {formatCurrency((order as { earning?: string })?.earning ?? "0")}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <p className="text-muted-foreground text-sm">Commission: Pending calculation (order must be fully paid and delivered/closed)</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {!isSuperAdmin && user?.id && order.createdBy === user.id && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">My Commission</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Amount:</span>
+              <span className="font-medium">{formatCurrency((order as { salesAgentCommission?: string })?.salesAgentCommission ?? "0")}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Status:</span>
+              <Badge variant={(order as { commissionStatus?: string })?.commissionStatus === "earned" ? "default" : "secondary"}>
+                {(order as { commissionStatus?: string })?.commissionStatus === "earned" ? "Earned" : "Pending"}
+              </Badge>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

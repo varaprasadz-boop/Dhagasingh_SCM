@@ -30,6 +30,9 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Role } from "@shared/schema";
 
+type CommissionType = "per_piece" | "per_order" | null;
+type CommissionMode = "fixed" | "percentage" | null;
+
 interface UserData {
   id: string;
   name: string;
@@ -38,9 +41,16 @@ interface UserData {
   roleId: string;
   status: "active" | "inactive";
   isSuperAdmin: boolean;
+  commissionType?: CommissionType | null;
+  commissionValue?: string | null;
+  commissionMode?: CommissionMode | null;
   createdAt: string | null;
   updatedAt: string | null;
   role?: Role;
+}
+
+interface RoleWithPermissions extends Role {
+  rolePermissions?: { permission: { code: string } }[];
 }
 
 export default function UserManagement() {
@@ -58,6 +68,9 @@ export default function UserManagement() {
     password: "",
     roleId: "",
     status: "active" as "active" | "inactive",
+    commissionType: "" as CommissionType | "",
+    commissionValue: "",
+    commissionMode: "" as CommissionMode | "",
   });
 
   const { data: users = [], isLoading: usersLoading } = useQuery<UserData[]>({
@@ -68,9 +81,32 @@ export default function UserManagement() {
     queryKey: ["/api/roles"],
   });
 
+  const { data: selectedRole } = useQuery<RoleWithPermissions>({
+    queryKey: ["/api/roles", formData.roleId],
+    enabled: !!formData.roleId,
+  });
+  const hasB2BPermission = Boolean(
+    selectedRole?.rolePermissions?.some(
+      (rp) =>
+        rp.permission?.code === "create_b2b_orders" ||
+        rp.permission?.code === "view_b2b_dashboard"
+    )
+  );
+
   const createUserMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      return apiRequest("POST", "/api/users", data);
+      const payload: Record<string, unknown> = {
+        name: data.name,
+        email: data.email,
+        phone: data.phone,
+        password: data.password,
+        roleId: data.roleId,
+        status: data.status,
+      };
+      if (data.commissionType) payload.commissionType = data.commissionType;
+      if (data.commissionValue !== "") payload.commissionValue = parseFloat(data.commissionValue) || null;
+      if (data.commissionMode) payload.commissionMode = data.commissionMode;
+      return apiRequest("POST", "/api/users", payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
@@ -85,7 +121,14 @@ export default function UserManagement() {
 
   const updateUserMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<typeof formData> }) => {
-      const { password, ...updateData } = data;
+      const { password, ...rest } = data;
+      const updateData: Record<string, unknown> = { ...rest };
+      if (rest.commissionType === "") updateData.commissionType = null;
+      else if (rest.commissionType) updateData.commissionType = rest.commissionType;
+      if (rest.commissionValue === "") updateData.commissionValue = null;
+      else if (rest.commissionValue != null) updateData.commissionValue = parseFloat(rest.commissionValue) || null;
+      if (rest.commissionMode === "") updateData.commissionMode = null;
+      else if (rest.commissionMode) updateData.commissionMode = rest.commissionMode;
       return apiRequest("PATCH", `/api/users/${id}`, updateData);
     },
     onSuccess: () => {
@@ -200,8 +243,11 @@ export default function UserManagement() {
       email: user.email,
       phone: user.phone,
       password: "",
-      roleId: user.roleId,
+      roleId: user.roleId ?? "",
       status: user.status,
+      commissionType: (user.commissionType ?? "") as CommissionType | "",
+      commissionValue: user.commissionValue != null ? String(user.commissionValue) : "",
+      commissionMode: (user.commissionMode ?? "") as CommissionMode | "",
     });
     setDialogOpen(true);
   };
@@ -233,6 +279,9 @@ export default function UserManagement() {
       password: "",
       roleId: "",
       status: "active",
+      commissionType: "",
+      commissionValue: "",
+      commissionMode: "",
     });
   };
 
@@ -416,6 +465,89 @@ export default function UserManagement() {
                 </p>
               )}
             </div>
+
+            {hasB2BPermission && (
+              <div className="space-y-4 rounded-lg border p-4">
+                <h4 className="text-sm font-medium">Commission Settings</h4>
+                <div className="space-y-2">
+                  <Label>Commission Type</Label>
+                  <Select
+                    value={formData.commissionType || "none"}
+                    onValueChange={(v) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        commissionType: v === "none" ? "" : (v as CommissionType),
+                        commissionMode: v !== "per_order" ? "" : prev.commissionMode || "fixed",
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="per_piece">Per Piece</SelectItem>
+                      <SelectItem value="per_order">Per Order</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {formData.commissionType === "per_piece" && (
+                  <div className="space-y-2">
+                    <Label>Amount per piece (₹)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={formData.commissionValue}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, commissionValue: e.target.value }))
+                      }
+                      placeholder="e.g. 10"
+                    />
+                  </div>
+                )}
+                {formData.commissionType === "per_order" && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Commission Mode</Label>
+                      <Select
+                        value={formData.commissionMode || "fixed"}
+                        onValueChange={(v) =>
+                          setFormData((prev) => ({ ...prev, commissionMode: v as CommissionMode }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="fixed">Fixed Amount</SelectItem>
+                          <SelectItem value="percentage">Percentage</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>
+                        {formData.commissionMode === "percentage"
+                          ? "Commission %"
+                          : "Commission amount (₹)"}
+                      </Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={formData.commissionMode === "percentage" ? 0.1 : 0.01}
+                        value={formData.commissionValue}
+                        onChange={(e) =>
+                          setFormData((prev) => ({ ...prev, commissionValue: e.target.value }))
+                        }
+                        placeholder={
+                          formData.commissionMode === "percentage" ? "e.g. 5" : "e.g. 500"
+                        }
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             <div className="flex items-center justify-between">
               <Label>Active Status</Label>

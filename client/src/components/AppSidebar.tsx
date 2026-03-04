@@ -31,6 +31,7 @@ import {
   FileText,
   CreditCard,
   Printer,
+  BarChart3,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
@@ -73,6 +74,7 @@ const b2bNavItems: NavItem[] = [
   { icon: Briefcase, label: "B2B Orders", path: "/b2b/orders", permission: "view_b2b_orders" },
   { icon: FileText, label: "Invoices", path: "/b2b/invoices", permission: "view_b2b_invoices" },
   { icon: CreditCard, label: "Payments", path: "/b2b/payments", permission: "view_b2b_payments" },
+  { icon: BarChart3, label: "Reports", path: "/b2b/reports", permission: "view_b2b_dashboard" },
   { icon: Printer, label: "Printing Types", path: "/b2b/printing-types", superAdminOnly: true },
 ];
 

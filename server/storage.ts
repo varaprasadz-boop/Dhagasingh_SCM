@@ -193,6 +193,101 @@ export interface IStorage {
   
   // B2B Dashboard Stats
   getB2BDashboardStats(createdBy?: string, fromDate?: Date, toDate?: Date): Promise<B2BDashboardStats>;
+
+  // B2B Commission summary for a sales agent
+  getB2BCommissionSummaryForUser(userId: string): Promise<{ earned: number; pending: number }>;
+
+  // B2B Reports
+  getB2BReportSummary(filters: B2BReportFilters): Promise<B2BReportSummaryResult>;
+  getB2BReportClientWise(filters: B2BReportFilters): Promise<B2BReportClientRow[]>;
+  getB2BReportAgentWise(filters: B2BReportFilters): Promise<B2BReportAgentRow[]>;
+  getB2BReportProductWise(filters: B2BReportFilters): Promise<B2BReportProductRow[]>;
+  getB2BReportStatusWise(filters: B2BReportFilters): Promise<B2BReportStatusRow[]>;
+  getB2BReportPayments(filters: B2BReportFilters): Promise<B2BReportPaymentRow[]>;
+  getB2BReportCommissions(filters: B2BReportFilters): Promise<B2BReportCommissionRow[]>;
+}
+
+export interface B2BReportFilters {
+  startDate?: string;
+  endDate?: string;
+  agentId?: string;
+  clientId?: string;
+  status?: string[];
+  paymentStatus?: string[];
+  createdBy?: string;
+}
+
+export interface B2BReportSummaryResult {
+  totalOrders: number;
+  totalRevenue: number;
+  totalProductCost: number;
+  totalCommission: number;
+  totalEarning: number;
+  ordersByStatus: Record<string, number>;
+  paymentCollectionRate: number;
+}
+
+export interface B2BReportClientRow {
+  clientId: string;
+  clientName: string;
+  ordersCount: number;
+  totalQty: number;
+  revenue: number;
+  received: number;
+  pending: number;
+  commission: number;
+  earning: number;
+}
+
+export interface B2BReportAgentRow {
+  agentId: string;
+  agentName: string;
+  clientsCount: number;
+  ordersCount: number;
+  revenue: number;
+  commissionEarned: number;
+  commissionPending: number;
+  collectionRate: number;
+}
+
+export interface B2BReportProductRow {
+  productId: string;
+  productName: string;
+  category: string;
+  qtyOrdered: number;
+  revenue: number;
+  costTotal: number;
+  margin: number;
+}
+
+export interface B2BReportStatusRow {
+  status: string;
+  orderCount: number;
+  totalValue: number;
+  percentOfTotal: number;
+}
+
+export interface B2BReportPaymentRow {
+  orderId: string;
+  orderNumber: string;
+  clientName: string;
+  totalAmount: number;
+  received: number;
+  pending: number;
+  paymentStatus: string;
+  daysOverdue: number;
+}
+
+export interface B2BReportCommissionRow {
+  agentId: string;
+  agentName: string;
+  orderId: string;
+  orderNumber: string;
+  clientName: string;
+  orderValue: number;
+  commissionType: string;
+  commissionAmount: number;
+  status: string;
 }
 
 interface OrderFilters {
@@ -2100,6 +2195,240 @@ class DatabaseStorage implements IStorage {
         byPeriod: { today: emptyPeriod },
       };
     }
+  }
+
+  async getB2BCommissionSummaryForUser(userId: string): Promise<{ earned: number; pending: number }> {
+    try {
+      const orders = await db.select({
+        salesAgentCommission: b2bOrders.salesAgentCommission,
+        commissionStatus: b2bOrders.commissionStatus,
+      })
+        .from(b2bOrders)
+        .where(eq(b2bOrders.createdBy, userId));
+      let earned = 0;
+      let pending = 0;
+      for (const o of orders) {
+        const amt = parseFloat(String(o.salesAgentCommission ?? 0)) || 0;
+        if (o.commissionStatus === "earned") earned += amt;
+        else pending += amt;
+      }
+      return { earned, pending };
+    } catch (error) {
+      console.error("Error fetching B2B commission summary:", error);
+      return { earned: 0, pending: 0 };
+    }
+  }
+
+  private async getB2BOrdersForReport(filters: B2BReportFilters): Promise<B2BOrderWithDetails[]> {
+    const conditions: any[] = [];
+    if (filters.startDate) conditions.push(gte(b2bOrders.createdAt, new Date(filters.startDate)));
+    if (filters.endDate) {
+      const end = new Date(filters.endDate);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(b2bOrders.createdAt, end));
+    }
+    if (filters.agentId) conditions.push(eq(b2bOrders.createdBy, filters.agentId));
+    if (filters.clientId) conditions.push(eq(b2bOrders.clientId, filters.clientId));
+    if (filters.createdBy) conditions.push(eq(b2bOrders.createdBy, filters.createdBy));
+    if (filters.status?.length) conditions.push(inArray(b2bOrders.status, filters.status as any));
+    if (filters.paymentStatus?.length) conditions.push(inArray(b2bOrders.paymentStatus, filters.paymentStatus as any));
+    const result = await db.query.b2bOrders.findMany({
+      where: conditions.length > 0 ? and(...conditions) : undefined,
+      with: { client: true, createdByUser: true, items: { with: { product: true } } },
+      orderBy: [desc(b2bOrders.createdAt)],
+    });
+    return (result || []) as unknown as B2BOrderWithDetails[];
+  }
+
+  async getB2BReportSummary(filters: B2BReportFilters): Promise<B2BReportSummaryResult> {
+    const orders = await this.getB2BOrdersForReport(filters);
+    let totalRevenue = 0, totalProductCost = 0, totalCommission = 0, totalReceived = 0;
+    const ordersByStatus: Record<string, number> = {};
+    for (const o of orders) {
+      totalRevenue += parseFloat(String(o.totalAmount ?? 0)) || 0;
+      totalProductCost += parseFloat(String((o as any).productCost ?? 0)) || 0;
+      totalCommission += parseFloat(String((o as any).salesAgentCommission ?? 0)) || 0;
+      totalReceived += parseFloat(String(o.amountReceived ?? 0)) || 0;
+      ordersByStatus[o.status] = (ordersByStatus[o.status] || 0) + 1;
+    }
+    const totalEarning = totalRevenue - totalProductCost - totalCommission;
+    const paymentCollectionRate = totalRevenue > 0 ? (totalReceived / totalRevenue) * 100 : 0;
+    return {
+      totalOrders: orders.length,
+      totalRevenue,
+      totalProductCost,
+      totalCommission,
+      totalEarning,
+      ordersByStatus,
+      paymentCollectionRate,
+    };
+  }
+
+  async getB2BReportClientWise(filters: B2BReportFilters): Promise<B2BReportClientRow[]> {
+    const orders = await this.getB2BOrdersForReport(filters);
+    const byClient: Record<string, B2BReportClientRow> = {};
+    for (const o of orders) {
+      const cid = o.clientId;
+      if (!byClient[cid]) {
+        byClient[cid] = {
+          clientId: cid,
+          clientName: (o.client as any)?.companyName ?? "Unknown",
+          ordersCount: 0,
+          totalQty: 0,
+          revenue: 0,
+          received: 0,
+          pending: 0,
+          commission: 0,
+          earning: 0,
+        };
+      }
+      const r = byClient[cid];
+      r.ordersCount += 1;
+      const qty = (o.items ?? []).reduce((s: number, i: any) => s + (i.quantity ?? 0), 0);
+      r.totalQty += qty;
+      r.revenue += parseFloat(String(o.totalAmount ?? 0)) || 0;
+      r.received += parseFloat(String(o.amountReceived ?? 0)) || 0;
+      r.pending += parseFloat(String(o.balancePending ?? 0)) || 0;
+      r.commission += parseFloat(String((o as any).salesAgentCommission ?? 0)) || 0;
+      r.earning += parseFloat(String((o as any).earning ?? 0)) || 0;
+    }
+    return Object.values(byClient);
+  }
+
+  async getB2BReportAgentWise(filters: B2BReportFilters): Promise<B2BReportAgentRow[]> {
+    const orders = await this.getB2BOrdersForReport(filters);
+    const byAgent: Record<string, B2BReportAgentRow> = {};
+    for (const o of orders) {
+      const uid = (o as any).createdBy ?? "unknown";
+      if (!byAgent[uid]) {
+        byAgent[uid] = {
+          agentId: uid,
+          agentName: (o.createdByUser as any)?.name ?? "Unknown",
+          clientsCount: 0,
+          ordersCount: 0,
+          revenue: 0,
+          commissionEarned: 0,
+          commissionPending: 0,
+          collectionRate: 0,
+        };
+      }
+      const r = byAgent[uid];
+      r.ordersCount += 1;
+      r.revenue += parseFloat(String(o.totalAmount ?? 0)) || 0;
+      const amt = parseFloat(String((o as any).salesAgentCommission ?? 0)) || 0;
+      if ((o as any).commissionStatus === "earned") r.commissionEarned += amt;
+      else r.commissionPending += amt;
+    }
+    const clientSet: Record<string, Set<string>> = {};
+    for (const o of orders) {
+      const uid = (o as any).createdBy ?? "unknown";
+      if (!clientSet[uid]) clientSet[uid] = new Set();
+      clientSet[uid].add(o.clientId);
+    }
+    const rows = Object.values(byAgent);
+    for (const r of rows) {
+      r.clientsCount = clientSet[r.agentId]?.size ?? 0;
+      const received = orders.filter((o: any) => (o as any).createdBy === r.agentId).reduce((s, o) => s + (parseFloat(String(o.amountReceived ?? 0)) || 0), 0);
+      r.collectionRate = r.revenue > 0 ? (received / r.revenue) * 100 : 0;
+    }
+    return rows;
+  }
+
+  async getB2BReportProductWise(filters: B2BReportFilters): Promise<B2BReportProductRow[]> {
+    const orders = await this.getB2BOrdersForReport(filters);
+    const byProduct: Record<string, B2BReportProductRow> = {};
+    for (const o of orders) {
+      for (const item of o.items ?? []) {
+        const pid = (item as any).productId ?? "unknown";
+        const key = pid;
+        if (!byProduct[key]) {
+          const itemWithProduct = item as { product?: { name?: string; category?: string } };
+          byProduct[key] = {
+            productId: pid,
+            productName: itemWithProduct.product?.name ?? "Unknown",
+            category: itemWithProduct.product?.category ?? "",
+            qtyOrdered: 0,
+            revenue: 0,
+            costTotal: 0,
+            margin: 0,
+          };
+          const variant = (item as any).productVariantId ? await this.getProductVariantById((item as any).productVariantId) : null;
+          (byProduct[key] as any)._costPrice = variant ? parseFloat(String(variant.costPrice ?? 0)) || 0 : 0;
+        }
+        const row = byProduct[key];
+        const qty = (item as any).quantity ?? 0;
+        row.qtyOrdered += qty;
+        const price = parseFloat(String((item as any).totalPrice ?? (item as any).unitPrice ?? 0)) || 0;
+        row.revenue += price;
+        const costPer = (row as any)._costPrice ?? 0;
+        row.costTotal += costPer * qty;
+      }
+    }
+    const rows = Object.values(byProduct).map((r) => {
+      const { _costPrice, ...rest } = r as any;
+      rest.margin = rest.revenue - rest.costTotal;
+      return rest as B2BReportProductRow;
+    });
+    return rows;
+  }
+
+  async getB2BReportStatusWise(filters: B2BReportFilters): Promise<B2BReportStatusRow[]> {
+    const orders = await this.getB2BOrdersForReport(filters);
+    const totalValue = orders.reduce((s, o) => s + (parseFloat(String(o.totalAmount ?? 0)) || 0), 0);
+    const byStatus: Record<string, { orderCount: number; totalValue: number }> = {};
+    for (const o of orders) {
+      const st = o.status;
+      if (!byStatus[st]) byStatus[st] = { orderCount: 0, totalValue: 0 };
+      byStatus[st].orderCount += 1;
+      byStatus[st].totalValue += parseFloat(String(o.totalAmount ?? 0)) || 0;
+    }
+    return Object.entries(byStatus).map(([status, v]) => ({
+      status,
+      orderCount: v.orderCount,
+      totalValue: v.totalValue,
+      percentOfTotal: totalValue > 0 ? (v.totalValue / totalValue) * 100 : 0,
+    }));
+  }
+
+  async getB2BReportPayments(filters: B2BReportFilters): Promise<B2BReportPaymentRow[]> {
+    const orders = await this.getB2BOrdersForReport(filters);
+    const now = new Date();
+    return orders.map((o) => {
+      const total = parseFloat(String(o.totalAmount ?? 0)) || 0;
+      const received = parseFloat(String(o.amountReceived ?? 0)) || 0;
+      const pending = total - received;
+      let daysOverdue = 0;
+      if (o.paymentStatus === "overdue" || (pending > 0 && o.requiredDeliveryDate)) {
+        const due = o.requiredDeliveryDate ? new Date(o.requiredDeliveryDate) : new Date(o.createdAt);
+        due.setDate(due.getDate() + 30);
+        if (now > due) daysOverdue = Math.floor((now.getTime() - due.getTime()) / (24 * 60 * 60 * 1000));
+      }
+      return {
+        orderId: o.id,
+        orderNumber: o.orderNumber,
+        clientName: (o.client as any)?.companyName ?? "Unknown",
+        totalAmount: total,
+        received,
+        pending,
+        paymentStatus: o.paymentStatus,
+        daysOverdue,
+      };
+    });
+  }
+
+  async getB2BReportCommissions(filters: B2BReportFilters): Promise<B2BReportCommissionRow[]> {
+    const orders = await this.getB2BOrdersForReport(filters);
+    return orders.map((o) => ({
+      agentId: (o as any).createdBy ?? "",
+      agentName: (o.createdByUser as any)?.name ?? "Unknown",
+      orderId: o.id,
+      orderNumber: o.orderNumber,
+      clientName: (o.client as any)?.companyName ?? "Unknown",
+      orderValue: parseFloat(String(o.totalAmount ?? 0)) || 0,
+      commissionType: (o.createdByUser as any)?.commissionType ?? "",
+      commissionAmount: parseFloat(String((o as any).salesAgentCommission ?? 0)) || 0,
+      status: (o as any).commissionStatus ?? "pending",
+    }));
   }
 
   // Seed default data

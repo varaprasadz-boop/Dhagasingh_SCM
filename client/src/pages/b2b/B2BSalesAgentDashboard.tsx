@@ -110,6 +110,10 @@ export default function B2BSalesAgentDashboard() {
     },
   });
 
+  const { data: commissionSummary } = useQuery<{ earned: number; pending: number }>({
+    queryKey: ["/api/b2b/commission/my-summary"],
+  });
+
   const periodMetrics =
     viewMode === "today" && stats?.byPeriod
       ? stats.byPeriod.today
@@ -239,7 +243,7 @@ export default function B2BSalesAgentDashboard() {
       </div>
 
       {/* Performance Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2 gap-2">
             <CardTitle className="text-sm font-medium">My Active Clients</CardTitle>
@@ -295,6 +299,30 @@ export default function B2BSalesAgentDashboard() {
             </CardContent>
           </Card>
         </Link>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2 gap-2">
+            <CardTitle className="text-sm font-medium">Total Commission Earned</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">
+              {formatCurrency(commissionSummary?.earned ?? 0)}
+            </div>
+            <p className="text-xs text-muted-foreground">From delivered & paid orders</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2 gap-2">
+            <CardTitle className="text-sm font-medium">Pending Commission</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-600">
+              {formatCurrency(commissionSummary?.pending ?? 0)}
+            </div>
+            <p className="text-xs text-muted-foreground">Orders in progress</p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Action Items */}

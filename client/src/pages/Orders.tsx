@@ -194,7 +194,11 @@ export default function Orders() {
         try {
           const body = JSON.parse(msg.slice(5)) as { error?: string; details?: string[] };
           const title = body.error ?? "Dispatch failed";
-          const description = Array.isArray(body.details) ? body.details.join(", ") : msg;
+          const description = Array.isArray(body.details)
+            ? body.details.length > 1
+              ? body.details.join("\n")
+              : body.details.join(", ")
+            : msg;
           toast({ title, description, variant: "destructive" });
           return;
         } catch {

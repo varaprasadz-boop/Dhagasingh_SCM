@@ -715,6 +715,14 @@ export default function B2BOrders() {
 
                   <div className="flex items-center gap-2">
                     <div className="text-right mr-4">
+                      <p className="text-sm text-muted-foreground">Commission</p>
+                      <p className="font-medium">
+                        {(order as { commissionStatus?: string })?.commissionStatus === "earned"
+                          ? formatCurrency((order as { salesAgentCommission?: string })?.salesAgentCommission ?? "0")
+                          : "Pending"}
+                      </p>
+                    </div>
+                    <div className="text-right mr-4">
                       <p className="text-sm text-muted-foreground">Received</p>
                       <p className="font-medium text-green-600">{formatCurrency(order.amountReceived)}</p>
                     </div>

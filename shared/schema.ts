@@ -28,6 +28,9 @@ export const b2bInvoiceStatusEnum = pgEnum("b2b_invoice_status", ["draft", "sent
 export const b2bPaymentStatusEnum = pgEnum("b2b_payment_status", ["not_paid", "advance_received", "partially_paid", "fully_paid", "overdue"]);
 export const b2bPaymentModeEnum = pgEnum("b2b_payment_mode", ["cash", "upi", "bank_transfer", "card", "cheque", "online_gateway"]);
 export const b2bArtworkStatusEnum = pgEnum("b2b_artwork_status", ["pending", "received", "approved", "revision_needed"]);
+export const b2bCommissionTypeEnum = pgEnum("b2b_commission_type", ["per_piece", "per_order"]);
+export const b2bCommissionModeEnum = pgEnum("b2b_commission_mode", ["fixed", "percentage"]);
+export const b2bCommissionStatusEnum = pgEnum("b2b_commission_status", ["pending", "earned"]);
 
 // B2B Printing Types (Super Admin configurable)
 export const b2bPrintingTypes = pgTable("b2b_printing_types", {
@@ -77,6 +80,9 @@ export const users = pgTable("users", {
   roleId: varchar("role_id").references(() => roles.id),
   status: userStatusEnum("status").default("active").notNull(),
   isSuperAdmin: boolean("is_super_admin").default(false).notNull(),
+  commissionType: b2bCommissionTypeEnum("commission_type"),
+  commissionValue: decimal("commission_value", { precision: 10, scale: 2 }),
+  commissionMode: b2bCommissionModeEnum("commission_mode"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -408,6 +414,10 @@ export const b2bOrders = pgTable("b2b_orders", {
   paymentStatus: b2bPaymentStatusEnum("payment_status").default("advance_received").notNull(),
   amountReceived: decimal("amount_received", { precision: 10, scale: 2 }).default("0").notNull(),
   balancePending: decimal("balance_pending", { precision: 10, scale: 2 }).default("0").notNull(),
+  salesAgentCommission: decimal("sales_agent_commission", { precision: 10, scale: 2 }).default("0").notNull(),
+  productCost: decimal("product_cost", { precision: 10, scale: 2 }).default("0").notNull(),
+  earning: decimal("earning", { precision: 10, scale: 2 }).default("0").notNull(),
+  commissionStatus: b2bCommissionStatusEnum("commission_status").default("pending").notNull(),
   // Legacy fields kept for compatibility
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).default("0").notNull(),
   printingCost: decimal("printing_cost", { precision: 10, scale: 2 }).default("0").notNull(),

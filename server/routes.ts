@@ -1,6 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage, type B2BReportFilters } from "./storage";
 import { rawQuery } from "./db";
 import { z } from "zod";
 import {
@@ -15,6 +15,7 @@ import {
 } from "@shared/schema";
 import Papa from "papaparse";
 import { delhiveryService, createDelhiveryShipmentFromOrder } from "./services/delhivery";
+import { calculateAndStoreCommission } from "./services/commission";
 
 declare global {
   namespace Express {
@@ -1079,6 +1080,7 @@ export async function registerRoutes(
         });
       }
 
+      // eCommerce dispatch: deduct stock and create outward movements for each line item
       for (const item of order.items) {
         const variant = await storage.getProductVariantBySku(item.sku);
         if (variant) {
@@ -2087,9 +2089,12 @@ export async function registerRoutes(
       if (fromDate) filters.fromDate = fromDate;
       if (toDate) filters.toDate = toDate;
 
-      const complaints = await storage.getComplaints(filters);
-      const orders = await storage.getOrders();
-      const products = await storage.getProducts();
+      const [complaints, orders, products, courierPartnersList] = await Promise.all([
+        storage.getComplaints(filters),
+        storage.getOrders(),
+        storage.getProducts(),
+        storage.getCourierPartners(),
+      ]);
 
       const byCategory = { general: 0, refund: 0, replacement: 0 };
       const byReason: Record<string, number> = {};
@@ -2097,7 +2102,7 @@ export async function registerRoutes(
       let replacementsCount = 0;
       let returnGoodCount = 0;
       let returnDamagedCount = 0;
-      const refundList: { orderNumber: string; amount: number; mode: string; date: string; processedBy: string }[] = [];
+      const refundListRaw: { orderNumber: string; amount: number; mode: string; date: string; processedByUserId: string | null }[] = [];
       let resolvedCount = 0;
       let totalResolutionDays = 0;
 
@@ -2113,12 +2118,12 @@ export async function registerRoutes(
         }
         if ((c as any).refundAmount) {
           totalRefundAmount += parseFloat((c as any).refundAmount);
-          refundList.push({
+          refundListRaw.push({
             orderNumber: (c as any).order?.orderNumber || "-",
             amount: parseFloat((c as any).refundAmount),
             mode: (c as any).refundMode || "-",
             date: (c as any).refundDate ? new Date((c as any).refundDate).toLocaleDateString("en-IN") : "-",
-            processedBy: (c as any).refundProcessedBy ? "—" : "-",
+            processedByUserId: (c as any).refundProcessedBy || null,
           });
         }
         if ((c as any).replacementOrderId) replacementsCount++;
@@ -2126,7 +2131,33 @@ export async function registerRoutes(
         if ((c as any).returnProductCondition === "damaged") returnDamagedCount++;
       }
 
-      const rtoOrders = orders.filter((o: any) => o.status === "rto" || o.status === "returned");
+      const processedByUserIds = [...new Set(refundListRaw.map((r) => r.processedByUserId).filter(Boolean))] as string[];
+      const userMap: Record<string, string> = {};
+      await Promise.all(
+        processedByUserIds.map(async (id) => {
+          const user = await storage.getUserById(id);
+          userMap[id] = user?.name ?? "—";
+        })
+      );
+      const refundList: { orderNumber: string; amount: number; mode: string; date: string; processedBy: string }[] = refundListRaw.map((r) => ({
+        orderNumber: r.orderNumber,
+        amount: r.amount,
+        mode: r.mode,
+        date: r.date,
+        processedBy: r.processedByUserId ? userMap[r.processedByUserId] ?? "—" : "-",
+      }));
+
+      let rtoOrders = orders.filter((o: any) => o.status === "rto" || o.status === "returned");
+      if (fromDate && toDate) {
+        const toEnd = new Date(toDate);
+        toEnd.setHours(23, 59, 59, 999);
+        rtoOrders = rtoOrders.filter((o: any) => {
+          const at = (o as any).rtoReceivedAt;
+          if (!at) return false;
+          const d = new Date(at);
+          return d >= fromDate && d <= toEnd;
+        });
+      }
       let rtoReceivedGood = 0;
       let rtoReceivedDamaged = 0;
       const byCourier: Record<string, { total: number; rto: number }> = {};
@@ -2139,6 +2170,11 @@ export async function registerRoutes(
       for (const o of rtoOrders) {
         if ((o as any).rtoProductCondition === "good") rtoReceivedGood++;
         if ((o as any).rtoProductCondition === "damaged") rtoReceivedDamaged++;
+      }
+
+      const courierNameById: Record<string, string> = {};
+      for (const cp of courierPartnersList) {
+        courierNameById[cp.id] = cp.name ?? cp.code ?? cp.id;
       }
 
       let totalDamagedUnits = 0;
@@ -2167,7 +2203,13 @@ export async function registerRoutes(
           totalRto: rtoOrders.length,
           rtoReceivedGood,
           rtoReceivedDamaged,
-          byCourier: Object.entries(byCourier).map(([id, v]) => ({ courierId: id, total: v.total, rto: v.rto, rtoRate: v.total > 0 ? (v.rto / v.total) * 100 : 0 })),
+          byCourier: Object.entries(byCourier).map(([id, v]) => ({
+            courierId: id,
+            courierName: id === "unknown" ? "Unknown" : (courierNameById[id] ?? id),
+            total: v.total,
+            rto: v.rto,
+            rtoRate: v.total > 0 ? (v.rto / v.total) * 100 : 0,
+          })),
         },
         damagedStock: { totalUnits: totalDamagedUnits, totalValue: totalDamagedValue },
         refundList,
@@ -2682,6 +2724,12 @@ export async function registerRoutes(
       }
       const { status, comment } = req.body;
       const order = await storage.updateB2BOrderStatus(req.params.id, status, comment, req.user!.id);
+      if ((status === "delivered" || status === "closed") && order) {
+        const refreshed = await storage.getB2BOrderById(req.params.id);
+        if (refreshed?.paymentStatus === "fully_paid") {
+          calculateAndStoreCommission(req.params.id).catch((err) => console.error("Commission calculation failed:", err));
+        }
+      }
       res.json(order);
     } catch (error) {
       res.status(500).json({ error: "Failed to update order status" });
@@ -2898,6 +2946,9 @@ export async function registerRoutes(
       }
       
       const updated = await storage.updateB2BOrder(req.params.id, updateData);
+      if (updated?.paymentStatus === "fully_paid" && (updated.status === "delivered" || updated.status === "closed")) {
+        calculateAndStoreCommission(req.params.id).catch((err) => console.error("Commission calculation failed:", err));
+      }
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: "Failed to update payment status" });
@@ -3044,6 +3095,10 @@ export async function registerRoutes(
         ...req.body,
         recordedBy: req.user!.id,
       });
+      const orderAfter = await storage.getB2BOrderById(req.body.orderId);
+      if (orderAfter?.paymentStatus === "fully_paid" && (orderAfter.status === "delivered" || orderAfter.status === "closed")) {
+        calculateAndStoreCommission(req.body.orderId).catch((err) => console.error("Commission calculation failed:", err));
+      }
       res.status(201).json(payment);
     } catch (error) {
       console.error("Error creating payment:", error);
@@ -3132,6 +3187,101 @@ export async function registerRoutes(
       res.json(stats);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch dashboard stats" });
+    }
+  });
+
+  app.get("/api/b2b/commission/my-summary", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_DASHBOARD), async (req, res) => {
+    try {
+      const summary = await storage.getB2BCommissionSummaryForUser(req.user!.id);
+      res.json(summary);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch commission summary" });
+    }
+  });
+
+  async function buildReportFilters(req: Request): Promise<B2BReportFilters> {
+    const canViewAll = await canViewAllB2BData(req.user!);
+    const filters: B2BReportFilters = {};
+    if (req.query.startDate) filters.startDate = req.query.startDate as string;
+    if (req.query.endDate) filters.endDate = req.query.endDate as string;
+    if (req.query.agentId && req.query.agentId !== "all") filters.agentId = req.query.agentId as string;
+    if (req.query.clientId && req.query.clientId !== "all") filters.clientId = req.query.clientId as string;
+    if (req.query.status) filters.status = (req.query.status as string).split(",").filter(Boolean);
+    if (req.query.paymentStatus) filters.paymentStatus = (req.query.paymentStatus as string).split(",").filter(Boolean);
+    if (!canViewAll) {
+      const uid = req.user!.id;
+      if (uid) filters.createdBy = uid;
+    }
+    return filters;
+  }
+
+  app.get("/api/b2b/reports/summary", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_DASHBOARD), async (req, res) => {
+    try {
+      const filters = await buildReportFilters(req);
+      const data = await storage.getB2BReportSummary(filters);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch report" });
+    }
+  });
+
+  app.get("/api/b2b/reports/client-wise", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_DASHBOARD), async (req, res) => {
+    try {
+      const filters = await buildReportFilters(req);
+      const data = await storage.getB2BReportClientWise(filters);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch report" });
+    }
+  });
+
+  app.get("/api/b2b/reports/agent-wise", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_DASHBOARD), async (req, res) => {
+    try {
+      const filters = await buildReportFilters(req);
+      const data = await storage.getB2BReportAgentWise(filters);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch report" });
+    }
+  });
+
+  app.get("/api/b2b/reports/product-wise", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_DASHBOARD), async (req, res) => {
+    try {
+      const filters = await buildReportFilters(req);
+      const data = await storage.getB2BReportProductWise(filters);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch report" });
+    }
+  });
+
+  app.get("/api/b2b/reports/status-wise", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_DASHBOARD), async (req, res) => {
+    try {
+      const filters = await buildReportFilters(req);
+      const data = await storage.getB2BReportStatusWise(filters);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch report" });
+    }
+  });
+
+  app.get("/api/b2b/reports/payments", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_DASHBOARD), async (req, res) => {
+    try {
+      const filters = await buildReportFilters(req);
+      const data = await storage.getB2BReportPayments(filters);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch report" });
+    }
+  });
+
+  app.get("/api/b2b/reports/commissions", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_DASHBOARD), async (req, res) => {
+    try {
+      const filters = await buildReportFilters(req);
+      const data = await storage.getB2BReportCommissions(filters);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch report" });
     }
   });
 

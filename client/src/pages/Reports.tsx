@@ -540,6 +540,36 @@ export default function Reports() {
                       <p className="text-xl font-bold text-orange-600">{complaintsReturnsReport.rtoAnalysis?.rtoReceivedDamaged ?? 0}</p>
                     </div>
                   </div>
+                  {(complaintsReturnsReport.rtoAnalysis?.byCourier ?? []).length > 0 && (
+                    <div className="mt-4 pt-4 border-t">
+                      <p className="text-sm font-medium text-muted-foreground mb-2">RTO rate by courier partner</p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b">
+                              <th className="text-left py-2">Courier</th>
+                              <th className="text-right py-2">Total orders</th>
+                              <th className="text-right py-2">RTO</th>
+                              <th className="text-right py-2">RTO %</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(complaintsReturnsReport.rtoAnalysis.byCourier ?? [])
+                              .filter((c: any) => c.courierId !== "unknown" || c.rto > 0)
+                              .sort((a: any, b: any) => (b.rtoRate ?? 0) - (a.rtoRate ?? 0))
+                              .map((c: any, i: number) => (
+                                <tr key={c.courierId ?? i} className="border-b">
+                                  <td className="py-2">{c.courierName ?? c.courierId ?? "—"}</td>
+                                  <td className="text-right py-2">{c.total ?? 0}</td>
+                                  <td className="text-right py-2">{c.rto ?? 0}</td>
+                                  <td className="text-right py-2 font-medium">{(c.rtoRate ?? 0).toFixed(1)}%</td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
               <Card>
@@ -555,6 +585,7 @@ export default function Reports() {
                           <th className="text-right py-2">Amount</th>
                           <th className="text-left py-2">Mode</th>
                           <th className="text-left py-2">Date</th>
+                          <th className="text-left py-2">Processed by</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -564,10 +595,11 @@ export default function Reports() {
                             <td className="text-right py-2">₹{r.amount?.toLocaleString()}</td>
                             <td className="py-2">{r.mode}</td>
                             <td className="py-2">{r.date}</td>
+                            <td className="py-2">{r.processedBy ?? "—"}</td>
                           </tr>
                         ))}
                         {(complaintsReturnsReport.refundList ?? []).length === 0 && (
-                          <tr><td colSpan={4} className="py-4 text-center text-muted-foreground">No refunds in period</td></tr>
+                          <tr><td colSpan={5} className="py-4 text-center text-muted-foreground">No refunds in period</td></tr>
                         )}
                       </tbody>
                     </table>
