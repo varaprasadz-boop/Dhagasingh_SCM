@@ -2583,17 +2583,31 @@ export async function registerRoutes(
     try {
       const canViewAll = await canViewAllB2BData(req.user!);
       const filters: any = {};
-      if (req.query.status) filters.status = req.query.status as string;
-      if (req.query.paymentStatus) filters.paymentStatus = req.query.paymentStatus as string;
+      if (req.query.status) {
+        const statuses = (req.query.status as string).split(",").map((s) => s.trim()).filter(Boolean);
+        if (statuses.length === 1) filters.status = statuses[0];
+        else if (statuses.length > 1) filters.statusIn = statuses;
+      }
+      if (req.query.paymentStatus) {
+        const paymentStatuses = (req.query.paymentStatus as string).split(",").map((s) => s.trim()).filter(Boolean);
+        if (paymentStatuses.length === 1) filters.paymentStatus = paymentStatuses[0];
+        else if (paymentStatuses.length > 1) filters.paymentStatusIn = paymentStatuses;
+      }
       if (req.query.clientId) filters.clientId = req.query.clientId as string;
       if (req.query.priority) filters.priority = req.query.priority as string;
       if (req.query.search) filters.search = req.query.search as string;
+      if (req.query.agentId && req.query.agentId !== "all" && canViewAll) filters.createdBy = req.query.agentId as string;
+      if (req.query.startDate) filters.fromDate = new Date((req.query.startDate as string) + "T00:00:00");
+      if (req.query.endDate) {
+        const end = new Date((req.query.endDate as string) + "T23:59:59.999");
+        filters.toDate = end;
+      }
 
       // Apply ownership filter if user cannot view all data
       if (!canViewAll) {
         filters.createdBy = req.user!.id;
       }
-      
+
       const orders = await storage.getB2BOrders(filters);
       res.json(orders);
     } catch (error) {
@@ -3090,9 +3104,12 @@ export async function registerRoutes(
       if (!canViewAll && order.createdBy !== req.user!.id) {
         return res.status(403).json({ error: "You can only create payments for your own orders" });
       }
-      
+      // Normalize payload: accept paymentMethod/referenceNumber (client) or paymentMode/transactionRef (schema)
+      const body = { ...req.body };
+      if (body.paymentMethod != null && body.paymentMode == null) body.paymentMode = body.paymentMethod;
+      if (body.referenceNumber != null && body.transactionRef == null) body.transactionRef = body.referenceNumber;
       const payment = await storage.createB2BPayment({
-        ...req.body,
+        ...body,
         recordedBy: req.user!.id,
       });
       const orderAfter = await storage.getB2BOrderById(req.body.orderId);

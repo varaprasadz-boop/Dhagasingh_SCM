@@ -348,6 +348,10 @@ export interface BulkStatusUpdateResult {
 interface B2BOrderFilters {
   status?: B2BOrder["status"];
   paymentStatus?: B2BOrder["paymentStatus"];
+  /** Multiple statuses (OR). Used when provided instead of status. */
+  statusIn?: B2BOrder["status"][];
+  /** Multiple payment statuses (OR). Used when provided instead of paymentStatus. */
+  paymentStatusIn?: B2BOrder["paymentStatus"][];
   clientId?: string;
   priority?: B2BOrder["priority"];
   fromDate?: Date;
@@ -1621,9 +1625,11 @@ class DatabaseStorage implements IStorage {
   async getB2BOrders(filters?: B2BOrderFilters): Promise<B2BOrderWithDetails[]> {
     try {
       const conditions: any[] = [];
-      
-      if (filters?.status) conditions.push(eq(b2bOrders.status, filters.status));
-      if (filters?.paymentStatus) conditions.push(eq(b2bOrders.paymentStatus, filters.paymentStatus));
+
+      if (filters?.statusIn?.length) conditions.push(inArray(b2bOrders.status, filters.statusIn as any));
+      else if (filters?.status) conditions.push(eq(b2bOrders.status, filters.status));
+      if (filters?.paymentStatusIn?.length) conditions.push(inArray(b2bOrders.paymentStatus, filters.paymentStatusIn as any));
+      else if (filters?.paymentStatus) conditions.push(eq(b2bOrders.paymentStatus, filters.paymentStatus));
       if (filters?.clientId) conditions.push(eq(b2bOrders.clientId, filters.clientId));
       if (filters?.priority) conditions.push(eq(b2bOrders.priority, filters.priority));
       if (filters?.fromDate) conditions.push(gte(b2bOrders.createdAt, filters.fromDate));

@@ -35,7 +35,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Search, ShoppingCart, Calendar, User, IndianRupee, Eye, ChevronDown, RefreshCw, Pencil } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Plus, Search, ShoppingCart, Calendar, User, IndianRupee, Eye, ChevronDown, RefreshCw, Pencil, Filter, RotateCcw } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
@@ -128,7 +130,70 @@ const paymentStatusColors: Record<string, string> = {
   advance_received: "bg-amber-100 text-amber-800",
   partially_paid: "bg-blue-100 text-blue-800",
   fully_paid: "bg-green-100 text-green-800",
+  overdue: "bg-red-100 text-red-800",
 };
+
+const DATE_PRESETS = [
+  { id: "today", label: "Today" },
+  { id: "this_week", label: "This Week" },
+  { id: "this_month", label: "This Month" },
+  { id: "last_month", label: "Last Month" },
+  { id: "last_3_months", label: "Last 3 Months" },
+  { id: "custom", label: "Custom" },
+] as const;
+
+const B2B_ORDER_STATUSES = [
+  "order_received", "design_review", "client_approval", "production_scheduled",
+  "printing_in_progress", "quality_check", "packed", "dispatched", "delivered", "closed", "cancelled",
+];
+
+const B2B_PAYMENT_STATUSES = ["not_paid", "advance_received", "partially_paid", "fully_paid", "overdue"];
+
+function getDateRange(preset: string, customFrom?: string, customTo?: string): { startDate: string; endDate: string } {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let start: Date;
+  let end: Date = new Date(today);
+  end.setDate(end.getDate() + 1);
+
+  switch (preset) {
+    case "today":
+      start = new Date(today);
+      break;
+    case "this_week": {
+      const day = now.getDay();
+      const monday = new Date(today);
+      monday.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
+      start = monday;
+      break;
+    }
+    case "this_month":
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+      break;
+    case "last_month":
+      start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      end = new Date(now.getFullYear(), now.getMonth(), 1);
+      break;
+    case "last_3_months":
+      start = new Date(today);
+      start.setMonth(start.getMonth() - 3);
+      break;
+    case "custom":
+      if (customFrom && customTo) {
+        return { startDate: customFrom, endDate: customTo };
+      }
+      start = new Date(today);
+      start.setMonth(start.getMonth() - 1);
+      break;
+    default:
+      start = new Date(today);
+      start.setMonth(start.getMonth() - 1);
+  }
+  return {
+    startDate: start.toISOString().split("T")[0],
+    endDate: end.toISOString().split("T")[0],
+  };
+}
 
 const ITEMS_PER_PAGE = 10;
 
@@ -154,12 +219,50 @@ export default function B2BOrders() {
   const [fromDate, setFromDate] = useState(todayStr);
   const [toDate, setToDate] = useState(todayStr);
 
+  // Reports-style filters (Apply sends to API)
+  const [datePreset, setDatePreset] = useState<string>("this_month");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [filterAgentId, setFilterAgentId] = useState<string>("all");
+  const [filterClientId, setFilterClientId] = useState<string>("all");
+  const [statusFilterMulti, setStatusFilterMulti] = useState<string[]>([]);
+  const [paymentStatusFilterMulti, setPaymentStatusFilterMulti] = useState<string[]>([]);
+  const [appliedFilters, setAppliedFilters] = useState<{
+    startDate: string;
+    endDate: string;
+    agentId: string;
+    clientId: string;
+    status: string[];
+    paymentStatus: string[];
+  } | null>(null);
+
+  const ordersQueryParams = appliedFilters
+    ? (() => {
+        const p = new URLSearchParams();
+        p.set("startDate", appliedFilters.startDate);
+        p.set("endDate", appliedFilters.endDate);
+        if (appliedFilters.agentId && appliedFilters.agentId !== "all") p.set("agentId", appliedFilters.agentId);
+        if (appliedFilters.clientId && appliedFilters.clientId !== "all") p.set("clientId", appliedFilters.clientId);
+        if (appliedFilters.status.length) p.set("status", appliedFilters.status.join(","));
+        if (appliedFilters.paymentStatus.length) p.set("paymentStatus", appliedFilters.paymentStatus.join(","));
+        return p.toString();
+      })()
+    : "";
+
+  const ordersUrl = "/api/b2b/orders" + (ordersQueryParams ? "?" + ordersQueryParams : "");
+
   const { data: orders, isLoading } = useQuery<B2BOrderWithDetails[]>({
-    queryKey: ["/api/b2b/orders"],
+    queryKey: [ordersUrl],
   });
 
   const { data: clients } = useQuery<B2BClient[]>({
     queryKey: ["/api/b2b/clients"],
+  });
+
+  const { data: users = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/users"],
+    select: (data: any[]) => data?.map((u) => ({ id: u.id, name: u.name })) ?? [],
+    enabled: isSuperAdmin,
   });
 
   const form = useForm<OrderFormData>({
@@ -231,19 +334,46 @@ export default function B2BOrders() {
     updateStatusMutation.mutate({ orderId: statusOrderId, status: quickStatus, comment: quickStatusComment });
   };
 
+  const applyFilters = () => {
+    const { startDate, endDate } = getDateRange(datePreset, customFrom, customTo);
+    setAppliedFilters({
+      startDate,
+      endDate,
+      agentId: filterAgentId,
+      clientId: filterClientId,
+      status: statusFilterMulti,
+      paymentStatus: paymentStatusFilterMulti,
+    });
+  };
+
+  const resetFilters = () => {
+    setDatePreset("this_month");
+    setCustomFrom("");
+    setCustomTo("");
+    setFilterAgentId("all");
+    setFilterClientId("all");
+    setStatusFilterMulti([]);
+    setPaymentStatusFilterMulti([]);
+    setAppliedFilters(null);
+  };
+
   const filteredOrders = orders?.filter((order) => {
     const matchesSearch =
+      !search ||
       order.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
       order.client?.companyName?.toLowerCase().includes(search.toLowerCase());
-    const matchesStatus = statusFilter === "all" || order.status === statusFilter;
-    const matchesAgent = agentFilter === "all" || order.createdBy === agentFilter;
     const matchesPending =
       !viewPending || (parseFloat(String(order.balancePending ?? 0)) > 0);
-    const matchesDate =
-      periodView === "today"
-        ? isOrderCreatedToday(order.createdAt)
-        : isOrderInDateRange(order.createdAt, fromDate, toDate);
-    return matchesSearch && matchesStatus && matchesAgent && matchesPending && matchesDate;
+    if (!appliedFilters) {
+      const matchesStatus = statusFilter === "all" || order.status === statusFilter;
+      const matchesAgent = agentFilter === "all" || order.createdBy === agentFilter;
+      const matchesDate =
+        periodView === "today"
+          ? isOrderCreatedToday(order.createdAt)
+          : isOrderInDateRange(order.createdAt, fromDate, toDate);
+      return matchesSearch && matchesStatus && matchesAgent && matchesPending && matchesDate;
+    }
+    return matchesSearch && matchesPending;
   });
 
   const agentOptions = Array.from(
@@ -259,7 +389,7 @@ export default function B2BOrders() {
 
   useEffect(() => {
     setDisplayCount(ITEMS_PER_PAGE);
-  }, [search, statusFilter, agentFilter, viewPending, periodView, fromDate, toDate]);
+  }, [search, statusFilter, agentFilter, viewPending, periodView, fromDate, toDate, appliedFilters]);
 
   const formatCurrency = (amount: string | number) => {
     const num = typeof amount === "string" ? parseFloat(amount) : amount;
@@ -297,75 +427,6 @@ export default function B2BOrders() {
             New Order
           </Button>
         </Link>
-      </div>
-
-      {/* Date filter bar — matches dashboard */}
-      <div
-        data-testid="orders-period-metrics"
-        className="rounded-lg border border-border/80 bg-muted/30 px-5 py-4"
-      >
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Period
-              </span>
-              <div className="flex rounded-md border border-input bg-background p-0.5 shadow-sm">
-                <Button
-                  variant={periodView === "today" ? "secondary" : "ghost"}
-                  size="sm"
-                  onClick={() => setPeriodView("today")}
-                  data-testid="orders-button-today"
-                  className="h-8 rounded border-0 px-3 text-xs font-medium transition-colors"
-                >
-                  Today
-                </Button>
-                <Button
-                  variant={periodView === "range" ? "secondary" : "ghost"}
-                  size="sm"
-                  onClick={() => setPeriodView("range")}
-                  className="h-8 rounded border-0 px-3 text-xs font-medium transition-colors"
-                >
-                  Range
-                </Button>
-              </div>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground sm:shrink-0">
-                Date range
-              </span>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
-                <DatePicker
-                  id="orders-from-date"
-                  value={fromDate}
-                  onChange={setFromDate}
-                  placeholder="From"
-                  data-testid="orders-input-from"
-                  className="h-9 min-w-[140px]"
-                />
-                <span className="hidden text-muted-foreground/60 sm:inline" aria-hidden>–</span>
-                <DatePicker
-                  id="orders-to-date"
-                  value={toDate}
-                  onChange={setToDate}
-                  placeholder="To"
-                  data-testid="orders-input-to"
-                  className="h-9 min-w-[140px]"
-                />
-                <Button
-                  variant={periodView === "range" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setPeriodView("range")}
-                  data-testid="orders-button-apply-range"
-                  className="h-9 shrink-0 gap-1.5 px-3 text-xs"
-                >
-                  <Calendar className="h-3.5 w-3.5" />
-                  Apply
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       {viewPending && (
@@ -622,15 +683,21 @@ export default function B2BOrders() {
         </DialogContent>
       </Dialog>
 
-      <Card>
-        <CardContent className="pt-6">
-          <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-end">
-            <div className="sm:col-span-12 md:col-span-6 lg:col-span-5">
-              <Label className="text-sm font-medium text-muted-foreground mb-2 block">Search</Label>
+      <Card data-testid="orders-filters-card">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Filter className="h-4 w-4" />
+            Filters
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="space-y-2">
+              <Label>Search</Label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search orders..."
+                  placeholder="Order # or client..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="pl-10 w-full"
@@ -638,41 +705,190 @@ export default function B2BOrders() {
                 />
               </div>
             </div>
-            <div className="sm:col-span-6 md:col-span-3">
-              <Label className="text-sm font-medium text-muted-foreground mb-2 block">Agent</Label>
-              <Select value={agentFilter} onValueChange={setAgentFilter}>
-                <SelectTrigger className="w-full" data-testid="select-agent-filter">
-                  <SelectValue placeholder="All agents" />
+            <div className="space-y-2">
+              <Label>Date Range</Label>
+              <Select value={datePreset} onValueChange={setDatePreset}>
+                <SelectTrigger data-testid="select-date-preset">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Agents</SelectItem>
-                  {agentOptions.map((agent) => (
-                    <SelectItem key={agent.id} value={agent.id}>
-                      {agent.name}
+                  {DATE_PRESETS.map((p) => (
+                    <SelectItem key={p.id} value={p.id} data-testid={`select-item-date-${p.id}`}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {datePreset === "custom" && (
+                <div className="flex gap-2 mt-2">
+                  <DatePicker value={customFrom} onChange={setCustomFrom} placeholder="From" data-testid="orders-input-from" />
+                  <DatePicker value={customTo} onChange={setCustomTo} placeholder="To" data-testid="orders-input-to" />
+                </div>
+              )}
+            </div>
+            {isSuperAdmin && (
+              <div className="space-y-2">
+                <Label>Sales Agent</Label>
+                <Select value={filterAgentId} onValueChange={setFilterAgentId}>
+                  <SelectTrigger data-testid="select-agent-filter">
+                    <SelectValue placeholder="All agents" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Agents</SelectItem>
+                    {users.map((u) => (
+                      <SelectItem key={u.id} value={u.id} data-testid={`select-item-agent-${u.id}`}>
+                        {u.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>Client</Label>
+              <Select value={filterClientId} onValueChange={setFilterClientId}>
+                <SelectTrigger data-testid="select-client-filter">
+                  <SelectValue placeholder="All clients" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Clients</SelectItem>
+                  {clients?.filter((c) => c.status === "active").map((c) => (
+                    <SelectItem key={c.id} value={c.id} data-testid={`select-item-client-${c.id}`}>
+                      {c.companyName}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="sm:col-span-6 md:col-span-3">
-              <Label className="text-sm font-medium text-muted-foreground mb-2 block">Status</Label>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full" data-testid="select-status-filter">
-                  <SelectValue placeholder="Show all statuses" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Statuses</SelectItem>
-                  {Object.entries(statusLabels).map(([value, label]) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
+            <div className="space-y-2">
+              <Label>Order Status</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between" data-testid="select-status-filter">
+                    {statusFilterMulti.length ? `${statusFilterMulti.length} selected` : "All statuses"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-56 p-2" align="start">
+                  {B2B_ORDER_STATUSES.map((s) => (
+                    <label key={s} className="flex items-center gap-2 p-2 rounded hover:bg-muted cursor-pointer">
+                      <Checkbox
+                        checked={statusFilterMulti.includes(s)}
+                        onCheckedChange={(checked) =>
+                          setStatusFilterMulti((prev) =>
+                            checked ? [...prev, s] : prev.filter((x) => x !== s)
+                          )
+                        }
+                        data-testid={`checkbox-status-${s}`}
+                      />
+                      <span className="text-sm capitalize">{s.replace(/_/g, " ")}</span>
+                    </label>
                   ))}
-                </SelectContent>
-              </Select>
+                </PopoverContent>
+              </Popover>
             </div>
+            <div className="space-y-2">
+              <Label>Payment Status</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between" data-testid="select-payment-status-filter">
+                    {paymentStatusFilterMulti.length ? `${paymentStatusFilterMulti.length} selected` : "All"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-56 p-2" align="start">
+                  {B2B_PAYMENT_STATUSES.map((s) => (
+                    <label key={s} className="flex items-center gap-2 p-2 rounded hover:bg-muted cursor-pointer">
+                      <Checkbox
+                        checked={paymentStatusFilterMulti.includes(s)}
+                        onCheckedChange={(checked) =>
+                          setPaymentStatusFilterMulti((prev) =>
+                            checked ? [...prev, s] : prev.filter((x) => x !== s)
+                          )
+                        }
+                        data-testid={`checkbox-payment-${s}`}
+                      />
+                      <span className="text-sm">{s.replace(/_/g, " ")}</span>
+                    </label>
+                  ))}
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={applyFilters} data-testid="button-apply-filters">
+              Apply Filters
+            </Button>
+            <Button variant="outline" onClick={resetFilters} data-testid="button-reset-filters">
+              <RotateCcw className="h-4 w-4 mr-2" />
+              Reset
+            </Button>
           </div>
         </CardContent>
       </Card>
+
+      {/* Legacy client-side quick filters when no API filters applied */}
+      {!appliedFilters && (
+        <Card className="border-dashed">
+          <CardContent className="pt-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-sm text-muted-foreground">Quick filter: Period</Label>
+                <div className="flex rounded-md border border-input bg-background p-0.5 shadow-sm">
+                  <Button
+                    variant={periodView === "today" ? "secondary" : "ghost"}
+                    size="sm"
+                    onClick={() => setPeriodView("today")}
+                    data-testid="orders-button-today"
+                    className="h-8 rounded border-0 px-3 text-xs"
+                  >
+                    Today
+                  </Button>
+                  <Button
+                    variant={periodView === "range" ? "secondary" : "ghost"}
+                    size="sm"
+                    onClick={() => setPeriodView("range")}
+                    className="h-8 rounded border-0 px-3 text-xs"
+                  >
+                    Range
+                  </Button>
+                </div>
+                {periodView === "range" && (
+                  <div className="flex gap-2 mt-2">
+                    <DatePicker value={fromDate} onChange={setFromDate} placeholder="From" data-testid="orders-input-from-legacy" className="h-9" />
+                    <DatePicker value={toDate} onChange={setToDate} placeholder="To" data-testid="orders-input-to-legacy" className="h-9" />
+                  </div>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm text-muted-foreground">Quick filter: Agent / Status</Label>
+                <div className="flex flex-wrap gap-2">
+                  <Select value={agentFilter} onValueChange={setAgentFilter}>
+                    <SelectTrigger className="w-[140px]" data-testid="select-agent-filter-legacy">
+                      <SelectValue placeholder="Agent" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Agents</SelectItem>
+                      {agentOptions.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="w-[140px]" data-testid="select-status-filter-legacy">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      {Object.entries(statusLabels).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {filteredOrders && filteredOrders.length > 0 ? (
         <div className="space-y-4">
@@ -700,6 +916,10 @@ export default function B2BOrders() {
                       <div className="flex items-center gap-1">
                         <User className="h-4 w-4" />
                         <span>{order.client?.companyName || "Unknown Client"}</span>
+                      </div>
+                      <div className="flex items-center gap-1" data-testid={`order-agent-${order.id}`}>
+                        <User className="h-4 w-4" />
+                        <span>Agent: {order.createdByUser?.name ?? "—"}</span>
                       </div>
                       <div className="flex items-center gap-1">
                         <IndianRupee className="h-4 w-4" />

@@ -192,38 +192,41 @@ export default function B2BReports() {
     return p.toString();
   }, [appliedFilters]);
 
+  // Use full URL in queryKey: fetcher uses queryKey.join("/"), so we pass a single key with "?params"
+  const reportUrl = (path: string) => (queryParams ? `${path}?${queryParams}` : path);
+
   const { data: summary, isLoading: summaryLoading } = useQuery<SummaryResult>({
-    queryKey: ["/api/b2b/reports/summary", queryParams],
+    queryKey: [reportUrl("/api/b2b/reports/summary")],
     enabled: !!queryParams,
   });
 
   const { data: clientWise = [], isLoading: clientWiseLoading } = useQuery<ClientRow[]>({
-    queryKey: ["/api/b2b/reports/client-wise", queryParams],
+    queryKey: [reportUrl("/api/b2b/reports/client-wise")],
     enabled: !!queryParams,
   });
 
   const { data: agentWise = [], isLoading: agentWiseLoading } = useQuery<AgentRow[]>({
-    queryKey: ["/api/b2b/reports/agent-wise", queryParams],
+    queryKey: [reportUrl("/api/b2b/reports/agent-wise")],
     enabled: !!queryParams && isSuperAdmin,
   });
 
   const { data: productWise = [], isLoading: productWiseLoading } = useQuery<ProductRow[]>({
-    queryKey: ["/api/b2b/reports/product-wise", queryParams],
+    queryKey: [reportUrl("/api/b2b/reports/product-wise")],
     enabled: !!queryParams,
   });
 
   const { data: statusWise = [], isLoading: statusWiseLoading } = useQuery<StatusRow[]>({
-    queryKey: ["/api/b2b/reports/status-wise", queryParams],
+    queryKey: [reportUrl("/api/b2b/reports/status-wise")],
     enabled: !!queryParams,
   });
 
   const { data: paymentsReport = [], isLoading: paymentsReportLoading } = useQuery<PaymentRow[]>({
-    queryKey: ["/api/b2b/reports/payments", queryParams],
+    queryKey: [reportUrl("/api/b2b/reports/payments")],
     enabled: !!queryParams,
   });
 
   const { data: commissionsReport = [], isLoading: commissionsReportLoading } = useQuery<CommissionRow[]>({
-    queryKey: ["/api/b2b/reports/commissions", queryParams],
+    queryKey: [reportUrl("/api/b2b/reports/commissions")],
     enabled: !!queryParams && isSuperAdmin,
   });
 

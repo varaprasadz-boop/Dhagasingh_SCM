@@ -176,9 +176,9 @@ export default function B2BOrderDetail() {
     if (!paymentAmount) return;
     addPaymentMutation.mutate({
       orderId: params.id,
-      amount: parseFloat(paymentAmount),
-      paymentMethod,
-      referenceNumber: paymentReference,
+      amount: String(parseFloat(paymentAmount)),
+      paymentMode: paymentMethod,
+      transactionRef: paymentReference || undefined,
       paymentDate: new Date().toISOString(),
     });
   };
@@ -461,6 +461,10 @@ export default function B2BOrderDetail() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Sales Agent:</span>
+              <span data-testid="order-agent-name">{order.createdByUser?.name ?? "—"}</span>
+            </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Priority:</span>
               <Badge variant={order.priority === "urgent" ? "destructive" : "outline"}>{order.priority}</Badge>
