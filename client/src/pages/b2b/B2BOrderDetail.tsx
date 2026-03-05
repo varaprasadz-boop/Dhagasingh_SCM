@@ -115,11 +115,13 @@ export default function B2BOrderDetail() {
     enabled: !!params.id,
   });
 
+  const paymentsUrl = `/api/b2b/payments?orderId=${params.id}`;
   const { data: payments } = useQuery<B2BPayment[]>({
-    queryKey: ["/api/b2b/payments"],
+    queryKey: [paymentsUrl],
+    enabled: !!params.id,
   });
 
-  const orderPayments = payments?.filter((p) => p.orderId === params.id);
+  const orderPayments = payments ?? [];
 
   const updateStatusMutation = useMutation({
     mutationFn: (data: { status: string; comment: string }) =>
@@ -142,7 +144,7 @@ export default function B2BOrderDetail() {
       apiRequest("POST", "/api/b2b/payments", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/b2b/orders", params.id] });
-      queryClient.invalidateQueries({ queryKey: ["/api/b2b/payments"] });
+      queryClient.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string)?.startsWith?.("/api/b2b/payments") });
       queryClient.invalidateQueries({ queryKey: ["/api/b2b/dashboard"] });
       toast({ title: "Payment recorded successfully" });
       setPaymentDialogOpen(false);
