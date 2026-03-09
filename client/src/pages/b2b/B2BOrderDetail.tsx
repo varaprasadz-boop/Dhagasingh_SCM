@@ -115,7 +115,7 @@ export default function B2BOrderDetail() {
     enabled: !!params.id,
   });
 
-  const paymentsUrl = `/api/b2b/payments?orderId=${params.id}`;
+  const paymentsUrl = `/api/b2b/orders/${params.id}/payments`;
   const { data: payments } = useQuery<B2BPayment[]>({
     queryKey: [paymentsUrl],
     enabled: !!params.id,
@@ -144,6 +144,7 @@ export default function B2BOrderDetail() {
       apiRequest("POST", "/api/b2b/payments", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/b2b/orders", params.id] });
+      queryClient.invalidateQueries({ queryKey: [paymentsUrl] });
       queryClient.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string)?.startsWith?.("/api/b2b/payments") });
       queryClient.invalidateQueries({ queryKey: ["/api/b2b/dashboard"] });
       toast({ title: "Payment recorded successfully" });
@@ -649,7 +650,11 @@ export default function B2BOrderDetail() {
         <CardContent>
           {order.artwork && order.artwork.length > 0 ? (
             <div className="space-y-3">
-              {order.artwork.map((file: { id: string; fileName: string; fileUrl: string; fileType?: string }) => (
+              {order.artwork.map((file: { id: string; fileName: string; fileUrl: string; fileType?: string }) => {
+                const pathForServe = file.fileUrl.startsWith("/uploads/") ? file.fileUrl : file.fileUrl.startsWith("http") ? null : (file.fileUrl.startsWith("uploads/") ? "/" + file.fileUrl : null);
+                const viewHref = pathForServe ? `/api/uploads/serve?path=${encodeURIComponent(pathForServe)}` : (file.fileUrl.startsWith("http") ? file.fileUrl : `${window.location.origin}${file.fileUrl.startsWith("/") ? file.fileUrl : "/" + file.fileUrl}`);
+                const downloadHref = pathForServe ? `/api/uploads/serve?path=${encodeURIComponent(pathForServe)}&download=1` : (file.fileUrl.startsWith("http") ? file.fileUrl : `${window.location.origin}${file.fileUrl.startsWith("/") ? file.fileUrl : "/" + file.fileUrl}`);
+                return (
                 <div key={file.id} className="flex items-center justify-between p-3 border rounded-lg gap-2">
                   <span className="text-sm font-medium truncate flex-1 min-w-0">{file.fileName}</span>
                   <div className="flex items-center gap-2 shrink-0">
@@ -660,7 +665,7 @@ export default function B2BOrderDetail() {
                       data-testid={`button-view-upload-${file.id}`}
                     >
                       <a
-                        href={file.fileUrl.startsWith("http") ? file.fileUrl : `${window.location.origin}${file.fileUrl.startsWith("/") ? file.fileUrl : "/" + file.fileUrl}`}
+                        href={viewHref}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1"
@@ -676,7 +681,7 @@ export default function B2BOrderDetail() {
                       data-testid={`button-download-upload-${file.id}`}
                     >
                       <a
-                        href={file.fileUrl.startsWith("http") ? file.fileUrl : `${window.location.origin}${file.fileUrl.startsWith("/") ? file.fileUrl : "/" + file.fileUrl}`}
+                        href={downloadHref}
                         target="_blank"
                         rel="noopener noreferrer"
                         download={file.fileName}
@@ -688,7 +693,7 @@ export default function B2BOrderDetail() {
                     </Button>
                   </div>
                 </div>
-              ))}
+              );})}
             </div>
           ) : (
             <p className="text-sm text-muted-foreground py-4">No uploads for this order yet.</p>
@@ -777,7 +782,7 @@ export default function B2BOrderDetail() {
                       </p>
                       {payment.proofUrl && (
                         <a
-                          href={payment.proofUrl}
+                          href={payment.proofUrl.startsWith("/uploads/") ? `/api/uploads/serve?path=${encodeURIComponent(payment.proofUrl)}` : payment.proofUrl.startsWith("http") ? payment.proofUrl : `/api/uploads/serve?path=${encodeURIComponent("/" + payment.proofUrl)}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-xs text-primary hover:underline inline-flex items-center gap-1 mt-1"

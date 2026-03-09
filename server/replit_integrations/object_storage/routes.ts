@@ -14,9 +14,11 @@ const ALLOWED_MIME_TYPES = [
   "image/bmp",
   "image/x-icon",
   "application/pdf",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+  "application/vnd.ms-excel", // .xls
 ];
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB — max upload size for B2B artwork, invoices, payment proofs
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -66,6 +68,8 @@ export function registerObjectStorageRoutes(app: Express): void {
           "image/bmp": ".bmp",
           "image/x-icon": ".ico",
           "application/pdf": ".pdf",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+          "application/vnd.ms-excel": ".xls",
         };
         const ext = mimeToExt[contentType] || path.extname(name) || ".bin";
         const objectPathWithExt = result.objectPath + ext;
@@ -160,6 +164,8 @@ export function registerObjectStorageRoutes(app: Express): void {
           "image/bmp": ".bmp",
           "image/x-icon": ".ico",
           "application/pdf": ".pdf",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+          "application/vnd.ms-excel": ".xls",
         };
         const ext = mimeToExt[req.file.mimetype] || path.extname(req.file.originalname) || ".bin";
         objectPath = await fileStorageService.saveLocalFile(
@@ -269,6 +275,43 @@ export function registerObjectStorageRoutes(app: Express): void {
       }
     });
   }
+
+  // Serve uploaded files via API so view/download work from any origin (e.g. dev client on different port)
+  app.get("/api/uploads/serve", (req, res) => {
+    const rawPath = req.query.path as string;
+    if (!rawPath || typeof rawPath !== "string") {
+      return res.status(400).json({ error: "Missing path query parameter" });
+    }
+    const pathParam = decodeURIComponent(rawPath).trim();
+    if (!pathParam.startsWith("/uploads/")) {
+      return res.status(400).json({ error: "Invalid path: must start with /uploads/" });
+    }
+    const allowedCategories = ["payment-proofs", "artwork", "misc"];
+    const parts = pathParam.replace(/^\/uploads\//, "").split("/");
+    const category = parts[0];
+    if (!allowedCategories.includes(category) || parts.length < 2) {
+      return res.status(400).json({ error: "Invalid path" });
+    }
+    const filePath = fileStorageService.getFilePath(pathParam);
+    if (!filePath) {
+      return res.status(404).json({ error: "File not found" });
+    }
+    const download = req.query.download === "1" || req.query.download === "true";
+    const options: { headers?: Record<string, string> } = {
+      headers: { "Cache-Control": "private, max-age=3600" },
+    };
+    if (download) {
+      const fileName = pathParam.split("/").pop() || "download";
+      options.headers = options.headers || {};
+      options.headers["Content-Disposition"] = `attachment; filename="${fileName}"`;
+    }
+    const absolutePath = path.resolve(filePath);
+    res.sendFile(absolutePath, options, (err) => {
+      if (err) {
+        if (!res.headersSent) res.status(404).json({ error: "File not found" });
+      }
+    });
+  });
 
   app.get("/api/uploads/storage-info", (_req, res) => {
     const mode = fileStorageService.getMode();

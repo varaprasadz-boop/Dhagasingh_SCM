@@ -2632,6 +2632,24 @@ export async function registerRoutes(
     }
   });
 
+  // Payments for a single order (same permission as viewing the order — so Payment History works for admin and agent)
+  app.get("/api/b2b/orders/:id/payments", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_ORDERS), async (req, res) => {
+    try {
+      const order = await storage.getB2BOrderById(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && order.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only view payments for your own orders" });
+      }
+      const payments = await storage.getB2BPayments(req.params.id, canViewAll ? undefined : req.user!.id);
+      res.json(payments);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch payments" });
+    }
+  });
+
   app.post("/api/b2b/orders", authMiddleware, requirePermission(PERMISSION_CODES.CREATE_B2B_ORDERS), async (req, res) => {
     try {
       // Validate payload with Zod schema (mandatory advance payment)
