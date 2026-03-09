@@ -184,6 +184,8 @@ export interface IStorage {
   // B2B Payments
   getB2BPayments(orderId?: string, createdBy?: string): Promise<B2BPayment[]>;
   createB2BPayment(payment: InsertB2BPayment): Promise<B2BPayment>;
+  /** Insert a payment record only (no order totals update). Used for advance at order creation so it shows in Payment History. */
+  createB2BPaymentRecordOnly(payment: InsertB2BPayment): Promise<B2BPayment>;
   
   // B2B Payment Milestones
   getB2BPaymentMilestones(orderId: string): Promise<B2BPaymentMilestone[]>;
@@ -1964,6 +1966,19 @@ class DatabaseStorage implements IStorage {
     
     const result = await db.select().from(b2bPayments).where(eq(b2bPayments.id, id));
     if (!result?.[0]) throw new Error("Failed to create payment");
+    return result[0];
+  }
+
+  async createB2BPaymentRecordOnly(payment: InsertB2BPayment): Promise<B2BPayment> {
+    const id = randomUUID();
+    const paymentData = {
+      ...payment,
+      id,
+      paymentDate: payment.paymentDate ? (typeof payment.paymentDate === "string" ? new Date(payment.paymentDate) : payment.paymentDate) : new Date(),
+    };
+    await db.insert(b2bPayments).values(paymentData);
+    const result = await db.select().from(b2bPayments).where(eq(b2bPayments.id, id));
+    if (!result?.[0]) throw new Error("Failed to create payment record");
     return result[0];
   }
 

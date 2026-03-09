@@ -2664,7 +2664,7 @@ export async function registerRoutes(
         });
       }
       
-      const { items, totalAmount, advanceAmount, advanceMode, advanceDate, advanceReference, requiredDeliveryDate, ...orderData } = parseResult.data;
+      const { items, totalAmount, advanceAmount, advanceMode, advanceDate, advanceReference, advanceProofUrl, requiredDeliveryDate, ...orderData } = parseResult.data;
       
       // Validate stock quantities before creating order
       const stockErrors: string[] = [];
@@ -2700,6 +2700,7 @@ export async function registerRoutes(
           advanceMode,
           advanceDate: new Date(advanceDate),
           advanceReference,
+          advanceProofUrl: advanceProofUrl || null,
           amountReceived: String(advanceAmount),
           balancePending: String(balancePending),
           paymentStatus: "advance_received",
@@ -2718,6 +2719,22 @@ export async function registerRoutes(
           };
         })
       );
+      // Create an initial payment record for the advance so it appears in Payment History (with proof/invoice)
+      if (advanceAmount > 0) {
+        try {
+          await storage.createB2BPaymentRecordOnly({
+            orderId: order.id,
+            amount: String(advanceAmount),
+            paymentMode: advanceMode,
+            paymentDate: new Date(advanceDate),
+            transactionRef: advanceReference || undefined,
+            proofUrl: advanceProofUrl || undefined,
+            recordedBy: req.user!.id,
+          });
+        } catch (err) {
+          console.error("Error creating advance payment record for order", order.id, err);
+        }
+      }
       res.status(201).json(order);
     } catch (error) {
       console.error("Error creating B2B order:", error);
