@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { KPICard } from "@/components/KPICard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +38,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Search, ShoppingCart, Calendar, User, IndianRupee, Eye, ChevronDown, RefreshCw, Pencil, Filter, RotateCcw } from "lucide-react";
+import { Plus, Search, ShoppingCart, Calendar, User, IndianRupee, Eye, ChevronDown, RefreshCw, Pencil, Filter, RotateCcw, LayoutList, TrendingUp, CheckCircle, Clock } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
@@ -871,14 +872,11 @@ export default function B2BOrders() {
           Showing orders for: <span className="font-medium text-foreground">{agentNameForCallout}</span>
         </p>
       )}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border bg-muted/40 px-4 py-2 text-sm" data-testid="orders-summary-bar">
-        <span><strong>{orderSummary.orderCount}</strong> orders</span>
-        <span>·</span>
-        <span><strong>{formatCurrency(orderSummary.totalBusiness)}</strong> total business</span>
-        <span>·</span>
-        <span><strong className="text-green-600">{formatCurrency(orderSummary.totalCollected)}</strong> collected</span>
-        <span>·</span>
-        <span><strong className="text-amber-600">{formatCurrency(orderSummary.totalPending)}</strong> pending</span>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" data-testid="orders-summary-bar">
+        <KPICard title="Orders" value={orderSummary.orderCount} icon={LayoutList} />
+        <KPICard title="Total business" value={formatCurrency(orderSummary.totalBusiness)} icon={TrendingUp} />
+        <KPICard title="Collected" value={formatCurrency(orderSummary.totalCollected)} icon={CheckCircle} valueClassName="text-green-600 dark:text-green-400" />
+        <KPICard title="Pending" value={formatCurrency(orderSummary.totalPending)} icon={Clock} valueClassName="text-amber-600 dark:text-amber-400" />
       </div>
 
       {agentSummary && (

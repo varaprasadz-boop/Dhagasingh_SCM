@@ -7,9 +7,11 @@ interface KPICardProps {
   icon: LucideIcon;
   trend?: { value: number; positive: boolean };
   subtitle?: string;
+  /** Optional class for the value (e.g. text-green-600, text-amber-600) */
+  valueClassName?: string;
 }
 
-export function KPICard({ title, value, icon: Icon, trend, subtitle }: KPICardProps) {
+export function KPICard({ title, value, icon: Icon, trend, subtitle, valueClassName }: KPICardProps) {
   return (
     <Card className="hover-elevate" data-testid={`card-kpi-${title.toLowerCase().replace(/\s+/g, "-")}`}>
       <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
@@ -17,7 +19,7 @@ export function KPICard({ title, value, icon: Icon, trend, subtitle }: KPICardPr
         <Icon className="h-4 w-4 text-muted-foreground" />
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
+        <div className={`text-2xl font-bold ${valueClassName ?? ""}`}>{value}</div>
         {trend && (
           <p className={`text-xs ${trend.positive ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
             {trend.positive ? "+" : ""}{trend.value}% from last week
