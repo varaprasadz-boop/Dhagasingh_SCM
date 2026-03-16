@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -16,8 +16,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Checkbox } from "@/components/ui/checkbox";
 import { BarChart3, Filter, RotateCcw, Download } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DataTable } from "@/components/DataTable";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import * as XLSX from "xlsx";
 
 function formatCurrency(amount: number) {
@@ -73,11 +76,20 @@ interface PaymentRow {
   orderId: string;
   orderNumber: string;
   clientName: string;
+  agentName: string;
+  orderDate: string;
   totalAmount: number;
   received: number;
   pending: number;
   paymentStatus: string;
+  advanceMode: string | null;
+  advanceDate: string | null;
+  advanceReference: string | null;
+  advanceProofStatus: "Uploaded" | "Not Uploaded";
+  subsequentPaymentsCount: number;
+  daysSinceOrderCreated: number;
   daysOverdue: number;
+  orderStatus: string;
 }
 interface CommissionRow {
   agentId: string;
@@ -89,6 +101,7 @@ interface CommissionRow {
   commissionType: string;
   commissionAmount: number;
   status: string;
+  commissionPaidAt?: string | null;
 }
 
 const DATE_PRESETS = [
@@ -230,11 +243,120 @@ export default function B2BReports() {
     enabled: !!queryParams && isSuperAdmin,
   });
 
+  const { toast } = useToast();
+  const markPayoutMutation = useMutation({
+    mutationFn: (orderId: string) => apiRequest("PATCH", `/api/b2b/orders/${orderId}/commission-payout`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string)?.includes?.("/api/b2b/reports/commissions") });
+      toast({ title: "Commission marked as paid" });
+    },
+    onError: () => {
+      toast({ title: "Failed to record payout", variant: "destructive" });
+    },
+  });
+
   const exportToExcel = (data: Record<string, unknown>[], filename: string) => {
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Report");
     XLSX.writeFile(wb, filename);
+  };
+
+  const exportOverviewToExcel = () => {
+    if (!appliedFilters || !summary) return;
+    const { startDate, endDate } = appliedFilters;
+    const summarySheet = [
+      { KPI: "Total Orders", Value: summary.totalOrders },
+      { KPI: "Total Revenue", Value: summary.totalRevenue },
+      { KPI: "Product Cost", Value: summary.totalProductCost },
+      { KPI: "Commission", Value: summary.totalCommission },
+      { KPI: "Earning", Value: summary.totalEarning },
+      { KPI: "Collection Rate %", Value: Number(summary.paymentCollectionRate ?? 0).toFixed(1) },
+    ];
+    const statusSheet = Object.entries(summary.ordersByStatus || {}).map(([status, count]) => ({
+      Status: status.replace(/_/g, " "),
+      "Order Count": count,
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summarySheet), "Summary");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(statusSheet), "Status Breakdown");
+    XLSX.writeFile(wb, `B2B-Report-Overview-${startDate}-to-${endDate}.xlsx`);
+  };
+
+  const downloadFullReport = () => {
+    if (!appliedFilters) return;
+    const { startDate, endDate } = appliedFilters;
+    const wb = XLSX.utils.book_new();
+    if (summary) {
+      const summarySheet = [
+        { KPI: "Total Orders", Value: summary.totalOrders },
+        { KPI: "Total Revenue", Value: summary.totalRevenue },
+        { KPI: "Product Cost", Value: summary.totalProductCost },
+        { KPI: "Commission", Value: summary.totalCommission },
+        { KPI: "Earning", Value: summary.totalEarning },
+        { KPI: "Collection Rate %", Value: Number(summary.paymentCollectionRate ?? 0).toFixed(1) },
+      ];
+      const statusSheet = Object.entries(summary.ordersByStatus || {}).map(([status, count]) => ({
+        Status: status.replace(/_/g, " "),
+        "Order Count": count,
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summarySheet), "Overview");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(statusSheet), "Status Breakdown");
+    }
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(clientWise.map((r) => ({ Client: r.clientName, Orders: r.ordersCount, "Total Qty": r.totalQty, Revenue: r.revenue, Received: r.received, Pending: r.pending, Commission: r.commission, Earning: r.earning }))),
+      "Client-wise"
+    );
+    if (isSuperAdmin) {
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(agentWise.map((r) => ({ Agent: r.agentName, Clients: r.clientsCount, Orders: r.ordersCount, Revenue: r.revenue, "Commission Earned": r.commissionEarned, "Commission Pending": r.commissionPending, "Collection Rate %": r.collectionRate.toFixed(1) }))),
+        "Agent-wise"
+      );
+    }
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(productWise.map((r) => ({ Product: r.productName, Category: r.category, "Qty Ordered": r.qtyOrdered, Revenue: r.revenue, "Cost Total": r.costTotal, Margin: r.margin }))),
+      "Product-wise"
+    );
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(statusWise.map((r) => ({ Status: r.status.replace(/_/g, " "), "Order Count": r.orderCount, "Total Value": r.totalValue, "% of Total": r.percentOfTotal.toFixed(1) }))),
+      "Status-wise"
+    );
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(
+        paymentsReport.map((r) => ({
+          "Order #": r.orderNumber,
+          "Client Name": r.clientName,
+          "Sales Agent Name": r.agentName,
+          "Order Date": r.orderDate,
+          "Total Amount": r.totalAmount,
+          "Amount Collected": r.received,
+          "Balance Pending": r.pending,
+          "Payment Status": r.paymentStatus.replace(/_/g, " "),
+          "Advance Payment Mode": r.advanceMode?.replace(/_/g, " ") ?? "",
+          "Advance Reference": r.advanceReference ?? "",
+          "Advance Date": r.advanceDate ?? "",
+          "Advance Proof": r.advanceProofStatus,
+          "Subsequent Payments Count": r.subsequentPaymentsCount,
+          "Days Since Order Created": r.daysSinceOrderCreated,
+          "Days Overdue": r.daysOverdue,
+          "Order Status": r.orderStatus.replace(/_/g, " "),
+        }))
+      ),
+      "Payments"
+    );
+    if (isSuperAdmin) {
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(commissionsReport.map((r) => ({ Agent: r.agentName, "Order #": r.orderNumber, Client: r.clientName, "Order Value": r.orderValue, "Commission Type": r.commissionType, "Commission Amount": r.commissionAmount, Status: r.status }))),
+        "Commissions"
+      );
+    }
+    XLSX.writeFile(wb, `B2B-Full-Report-${startDate}-to-${endDate}.xlsx`);
   };
 
   const applyFilters = () => {
@@ -261,13 +383,28 @@ export default function B2BReports() {
   };
 
   return (
+    <TooltipProvider>
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <BarChart3 className="h-7 w-7" />
-          B2B Corporate Reports
-        </h1>
-        <p className="text-muted-foreground">Filter and export B2B order and commission reports</p>
+      <div className="flex flex-row items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <BarChart3 className="h-7 w-7" />
+            B2B Corporate Reports
+          </h1>
+          <p className="text-muted-foreground">Filter and export B2B order and commission reports</p>
+        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <Button variant="default" size="sm" onClick={downloadFullReport} disabled={!appliedFilters}>
+                <Download className="h-4 w-4 mr-2" /> Download Full Report
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {!appliedFilters ? "Apply filters first" : "Download all report tabs as one Excel file"}
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       <Card>
@@ -418,6 +555,21 @@ export default function B2BReports() {
             <Skeleton className="h-64" />
           ) : summary ? (
             <>
+              <div className="flex flex-row items-center justify-between gap-4 flex-wrap">
+                <span className="text-muted-foreground text-sm">Overview for selected period</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <Button variant="outline" size="sm" onClick={exportOverviewToExcel} disabled={!appliedFilters || summaryLoading || !summary}>
+                        <Download className="h-4 w-4 mr-2" /> Export to Excel
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {!appliedFilters ? "Apply filters to load data first" : summaryLoading || !summary ? "No data to export" : "Export overview to Excel"}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <Card><CardContent className="pt-4"><p className="text-sm text-muted-foreground">Total Orders</p><p className="text-2xl font-bold">{summary.totalOrders}</p></CardContent></Card>
                 <Card><CardContent className="pt-4"><p className="text-sm text-muted-foreground">Total Revenue</p><p className="text-2xl font-bold">{formatCurrency(summary.totalRevenue)}</p></CardContent></Card>
@@ -455,9 +607,18 @@ export default function B2BReports() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Client-wise Report</CardTitle>
-                <Button variant="outline" size="sm" onClick={() => exportToExcel(clientWise.map((r) => ({ Client: r.clientName, Orders: r.ordersCount, "Total Qty": r.totalQty, Revenue: r.revenue, Received: r.received, Pending: r.pending, Commission: r.commission, Earning: r.earning })), "B2B-Report-ClientWise.xlsx")}>
-                  <Download className="h-4 w-4 mr-2" /> Export to Excel
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <Button variant="outline" size="sm" disabled={!appliedFilters || clientWiseLoading || clientWise.length === 0} onClick={() => exportToExcel(clientWise.map((r) => ({ Client: r.clientName, Orders: r.ordersCount, "Total Qty": r.totalQty, Revenue: r.revenue, Received: r.received, Pending: r.pending, Commission: r.commission, Earning: r.earning })), "B2B-Report-ClientWise.xlsx")}>
+                        <Download className="h-4 w-4 mr-2" /> Export to Excel
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {!appliedFilters ? "Apply filters to load data first" : clientWiseLoading || clientWise.length === 0 ? "No data to export" : "Export to Excel"}
+                  </TooltipContent>
+                </Tooltip>
               </CardHeader>
               <CardContent>
                 {clientWiseLoading ? <Skeleton className="h-64" /> : (
@@ -489,9 +650,18 @@ export default function B2BReports() {
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle>Agent-wise Report</CardTitle>
-                  <Button variant="outline" size="sm" onClick={() => exportToExcel(agentWise.map((r) => ({ Agent: r.agentName, Clients: r.clientsCount, Orders: r.ordersCount, Revenue: r.revenue, "Commission Earned": r.commissionEarned, "Commission Pending": r.commissionPending, "Collection Rate %": r.collectionRate.toFixed(1) })), "B2B-Report-AgentWise.xlsx")}>
-                    <Download className="h-4 w-4 mr-2" /> Export to Excel
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <Button variant="outline" size="sm" disabled={!appliedFilters || agentWiseLoading || agentWise.length === 0} onClick={() => exportToExcel(agentWise.map((r) => ({ Agent: r.agentName, Clients: r.clientsCount, Orders: r.ordersCount, Revenue: r.revenue, "Commission Earned": r.commissionEarned, "Commission Pending": r.commissionPending, "Collection Rate %": r.collectionRate.toFixed(1) })), "B2B-Report-AgentWise.xlsx")}>
+                          <Download className="h-4 w-4 mr-2" /> Export to Excel
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {!appliedFilters ? "Apply filters to load data first" : agentWiseLoading || agentWise.length === 0 ? "No data to export" : "Export to Excel"}
+                    </TooltipContent>
+                  </Tooltip>
                 </CardHeader>
                 <CardContent>
                   {agentWiseLoading ? <Skeleton className="h-64" /> : (
@@ -522,9 +692,18 @@ export default function B2BReports() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Product/Category-wise Report</CardTitle>
-                <Button variant="outline" size="sm" onClick={() => exportToExcel(productWise.map((r) => ({ Product: r.productName, Category: r.category, "Qty Ordered": r.qtyOrdered, Revenue: r.revenue, "Cost Total": r.costTotal, Margin: r.margin })), "B2B-Report-ProductWise.xlsx")}>
-                  <Download className="h-4 w-4 mr-2" /> Export to Excel
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <Button variant="outline" size="sm" disabled={!appliedFilters || productWiseLoading || productWise.length === 0} onClick={() => exportToExcel(productWise.map((r) => ({ Product: r.productName, Category: r.category, "Qty Ordered": r.qtyOrdered, Revenue: r.revenue, "Cost Total": r.costTotal, Margin: r.margin })), "B2B-Report-ProductWise.xlsx")}>
+                        <Download className="h-4 w-4 mr-2" /> Export to Excel
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {!appliedFilters ? "Apply filters to load data first" : productWiseLoading || productWise.length === 0 ? "No data to export" : "Export to Excel"}
+                  </TooltipContent>
+                </Tooltip>
               </CardHeader>
               <CardContent>
                 {productWiseLoading ? <Skeleton className="h-64" /> : (
@@ -553,9 +732,18 @@ export default function B2BReports() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Status-wise Report</CardTitle>
-                <Button variant="outline" size="sm" onClick={() => exportToExcel(statusWise.map((r) => ({ Status: r.status.replace(/_/g, " "), "Order Count": r.orderCount, "Total Value": r.totalValue, "% of Total": r.percentOfTotal.toFixed(1) })), "B2B-Report-StatusWise.xlsx")}>
-                  <Download className="h-4 w-4 mr-2" /> Export to Excel
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <Button variant="outline" size="sm" disabled={!appliedFilters || statusWiseLoading || statusWise.length === 0} onClick={() => exportToExcel(statusWise.map((r) => ({ Status: r.status.replace(/_/g, " "), "Order Count": r.orderCount, "Total Value": r.totalValue, "% of Total": r.percentOfTotal.toFixed(1) })), "B2B-Report-StatusWise.xlsx")}>
+                        <Download className="h-4 w-4 mr-2" /> Export to Excel
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {!appliedFilters ? "Apply filters to load data first" : statusWiseLoading || statusWise.length === 0 ? "No data to export" : "Export to Excel"}
+                  </TooltipContent>
+                </Tooltip>
               </CardHeader>
               <CardContent>
                 {statusWiseLoading ? <Skeleton className="h-64" /> : (
@@ -582,9 +770,18 @@ export default function B2BReports() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Payment Collection</CardTitle>
-                <Button variant="outline" size="sm" onClick={() => exportToExcel(paymentsReport.map((r) => ({ "Order #": r.orderNumber, Client: r.clientName, "Total Amount": r.totalAmount, Received: r.received, Pending: r.pending, "Payment Status": r.paymentStatus, "Days Overdue": r.daysOverdue })), "B2B-Report-Payments.xlsx")}>
-                  <Download className="h-4 w-4 mr-2" /> Export to Excel
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <Button variant="outline" size="sm" disabled={!appliedFilters || paymentsReportLoading || paymentsReport.length === 0} onClick={() => exportToExcel(paymentsReport.map((r) => ({ "Order #": r.orderNumber, "Client Name": r.clientName, "Sales Agent Name": r.agentName, "Order Date": r.orderDate, "Total Amount": r.totalAmount, "Amount Collected": r.received, "Balance Pending": r.pending, "Payment Status": r.paymentStatus.replace(/_/g, " "), "Advance Payment Mode": r.advanceMode?.replace(/_/g, " ") ?? "", "Advance Reference": r.advanceReference ?? "", "Advance Date": r.advanceDate ?? "", "Advance Proof": r.advanceProofStatus, "Subsequent Payments Count": r.subsequentPaymentsCount, "Days Since Order Created": r.daysSinceOrderCreated, "Days Overdue": r.daysOverdue, "Order Status": r.orderStatus.replace(/_/g, " ") })), "B2B-Report-Payments.xlsx")}>
+                        <Download className="h-4 w-4 mr-2" /> Export to Excel
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {!appliedFilters ? "Apply filters to load data first" : paymentsReportLoading || paymentsReport.length === 0 ? "No data to export" : "Export to Excel"}
+                  </TooltipContent>
+                </Tooltip>
               </CardHeader>
               <CardContent>
                 {paymentsReportLoading ? <Skeleton className="h-64" /> : (
@@ -593,11 +790,19 @@ export default function B2BReports() {
                     columns={[
                       { key: "orderNumber", header: "Order #", sortable: true },
                       { key: "clientName", header: "Client", sortable: true },
+                      { key: "agentName", header: "Sales Agent", sortable: true },
+                      { key: "orderDate", header: "Order Date", sortable: true },
                       { key: "totalAmount", header: "Total", sortable: true, render: (r) => formatCurrency(r.totalAmount) },
                       { key: "received", header: "Received", sortable: true, render: (r) => formatCurrency(r.received) },
                       { key: "pending", header: "Pending", sortable: true, render: (r) => formatCurrency(r.pending) },
                       { key: "paymentStatus", header: "Payment Status", sortable: true, render: (r) => r.paymentStatus.replace(/_/g, " ") },
+                      { key: "advanceMode", header: "Advance Mode", sortable: true, render: (r) => r.advanceMode?.replace(/_/g, " ") ?? "—" },
+                      { key: "advanceReference", header: "Advance Ref", sortable: true, render: (r) => r.advanceReference ?? "—" },
+                      { key: "advanceProofStatus", header: "Advance Proof", sortable: true },
+                      { key: "subsequentPaymentsCount", header: "Subsequent Payments", sortable: true },
+                      { key: "daysSinceOrderCreated", header: "Days Since Order", sortable: true },
                       { key: "daysOverdue", header: "Days Overdue", sortable: true, render: (r) => r.daysOverdue > 0 ? <span className="text-red-600 font-medium">{r.daysOverdue}</span> : r.daysOverdue },
+                      { key: "orderStatus", header: "Order Status", sortable: true, render: (r) => r.orderStatus.replace(/_/g, " ") },
                     ]}
                     getRowId={(r) => r.orderId}
                     emptyMessage="No data"
@@ -615,9 +820,18 @@ export default function B2BReports() {
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle>Commission Report</CardTitle>
-                  <Button variant="outline" size="sm" onClick={() => exportToExcel(commissionsReport.map((r) => ({ Agent: r.agentName, "Order #": r.orderNumber, Client: r.clientName, "Order Value": r.orderValue, "Commission Type": r.commissionType, "Commission Amount": r.commissionAmount, Status: r.status })), "B2B-Report-Commissions.xlsx")}>
-                    <Download className="h-4 w-4 mr-2" /> Export to Excel
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <Button variant="outline" size="sm" disabled={!appliedFilters || commissionsReportLoading || commissionsReport.length === 0} onClick={() => exportToExcel(commissionsReport.map((r) => ({ Agent: r.agentName, "Order #": r.orderNumber, Client: r.clientName, "Order Value": r.orderValue, "Commission Type": r.commissionType, "Commission Amount": r.commissionAmount, Status: r.status })), "B2B-Report-Commissions.xlsx")}>
+                          <Download className="h-4 w-4 mr-2" /> Export to Excel
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {!appliedFilters ? "Apply filters to load data first" : commissionsReportLoading || commissionsReport.length === 0 ? "No data to export" : "Export to Excel"}
+                    </TooltipContent>
+                  </Tooltip>
                 </CardHeader>
                 <CardContent>
                   {commissionsReportLoading ? <Skeleton className="h-64" /> : (
@@ -632,6 +846,30 @@ export default function B2BReports() {
                           { key: "commissionType", header: "Commission Type", sortable: true, render: (r) => r.commissionType.replace(/_/g, " ") },
                           { key: "commissionAmount", header: "Commission Amount", sortable: true, render: (r) => formatCurrency(r.commissionAmount) },
                           { key: "status", header: "Status", sortable: true },
+                          {
+                            key: "payout",
+                            header: "Payout",
+                            sortable: false,
+                            render: (r) =>
+                              r.status === "earned" ? (
+                                r.commissionPaidAt ? (
+                                  <span className="text-muted-foreground text-sm">
+                                    Paid {new Date(r.commissionPaidAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                                  </span>
+                                ) : (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={markPayoutMutation.isPending}
+                                    onClick={() => markPayoutMutation.mutate(r.orderId)}
+                                  >
+                                    {markPayoutMutation.isPending ? "Saving..." : "Mark as Paid"}
+                                  </Button>
+                                )
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              ),
+                          },
                         ]}
                         getRowId={(r) => `${r.agentId}-${r.orderId}`}
                         emptyMessage="No data"
@@ -649,5 +887,6 @@ export default function B2BReports() {
         )}
       </Tabs>
     </div>
+    </TooltipProvider>
   );
 }

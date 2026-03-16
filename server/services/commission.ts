@@ -1,5 +1,6 @@
 import { storage } from "../storage";
-import type { B2BOrderWithDetails, UserWithRole } from "@shared/schema";
+import type { UserWithRole } from "@shared/schema";
+import { computeCommissionAmount } from "../utils/commissionCalc";
 
 /**
  * Calculate and store commission, product cost, and earning for a B2B order
@@ -30,28 +31,15 @@ export async function calculateAndStoreCommission(orderId: string): Promise<void
     }
   }
 
-  let salesAgentCommission = 0;
   const createdBy = order.createdBy;
-  if (createdBy) {
-    const agent = await storage.getUserById(createdBy) as UserWithRole & {
-      commissionType?: string | null;
-      commissionValue?: string | null;
-      commissionMode?: string | null;
-    };
-    if (agent?.commissionType && agent.commissionValue != null) {
-      const value = parseFloat(String(agent.commissionValue)) || 0;
-      if (agent.commissionType === "per_piece") {
-        salesAgentCommission = value * totalQuantity;
-      } else if (agent.commissionType === "per_order") {
-        if (agent.commissionMode === "percentage") {
-          salesAgentCommission = (value / 100) * totalAmount;
-        } else {
-          salesAgentCommission = value;
-        }
+  const agent = createdBy
+    ? (await storage.getUserById(createdBy)) as UserWithRole & {
+        commissionType?: string | null;
+        commissionValue?: string | null;
+        commissionMode?: string | null;
       }
-    }
-  }
-
+    : null;
+  const salesAgentCommission = computeCommissionAmount(totalAmount, totalQuantity, agent);
   const earning = totalAmount - productCost - salesAgentCommission;
 
   await storage.updateB2BOrder(orderId, {

@@ -43,6 +43,7 @@ import {
 import { Link, useParams } from "wouter";
 import { format } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
+import { useUpload } from "@/hooks/use-upload";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -92,6 +93,15 @@ const paymentStatusLabels: Record<string, string> = {
   fully_paid: "Fully Paid",
 };
 
+const advanceModeLabels: Record<string, string> = {
+  cash: "Cash",
+  upi: "UPI",
+  bank_transfer: "Bank Transfer",
+  card: "Card",
+  cheque: "Cheque",
+  online_gateway: "Online Gateway",
+};
+
 export default function B2BOrderDetail() {
   const params = useParams<{ id: string }>();
   const { toast } = useToast();
@@ -103,6 +113,8 @@ export default function B2BOrderDetail() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
   const [paymentReference, setPaymentReference] = useState("");
+  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [paymentProofUrl, setPaymentProofUrl] = useState("");
   const canEdit = isSuperAdmin || hasPermission("edit_b2b_orders");
   const canDelete = isSuperAdmin;
 
@@ -122,6 +134,17 @@ export default function B2BOrderDetail() {
   });
 
   const orderPayments = payments ?? [];
+
+  const { uploadFile: uploadPaymentProof, isUploading: isPaymentProofUploading } = useUpload({
+    category: "payment-proofs",
+    onSuccess: (response) => {
+      setPaymentProofUrl(response.objectPath);
+      toast({ title: "Payment proof uploaded successfully" });
+    },
+    onError: (error) => {
+      toast({ title: "Failed to upload payment proof", description: error.message, variant: "destructive" });
+    },
+  });
 
   const updateStatusMutation = useMutation({
     mutationFn: (data: { status: string; comment: string }) =>
@@ -151,6 +174,8 @@ export default function B2BOrderDetail() {
       setPaymentDialogOpen(false);
       setPaymentAmount("");
       setPaymentReference("");
+      setPaymentDate(new Date().toISOString().split("T")[0]);
+      setPaymentProofUrl("");
     },
     onError: () => {
       toast({ title: "Failed to record payment", variant: "destructive" });
@@ -170,6 +195,17 @@ export default function B2BOrderDetail() {
     },
   });
 
+  const markPayoutMutation = useMutation({
+    mutationFn: () => apiRequest("PATCH", `/api/b2b/orders/${params.id}/commission-payout`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/b2b/orders", params.id] });
+      toast({ title: "Commission marked as paid" });
+    },
+    onError: () => {
+      toast({ title: "Failed to record payout", variant: "destructive" });
+    },
+  });
+
   const handleStatusUpdate = () => {
     if (!newStatus) return;
     updateStatusMutation.mutate({ status: newStatus, comment: statusComment });
@@ -182,7 +218,8 @@ export default function B2BOrderDetail() {
       amount: String(parseFloat(paymentAmount)),
       paymentMode: paymentMethod,
       transactionRef: paymentReference || undefined,
-      paymentDate: new Date().toISOString(),
+      paymentDate: paymentDate ? new Date(paymentDate + "T12:00:00").toISOString() : new Date().toISOString(),
+      proofUrl: paymentProofUrl || undefined,
     });
   };
 
@@ -308,8 +345,18 @@ export default function B2BOrderDetail() {
                       <SelectItem value="upi">UPI</SelectItem>
                       <SelectItem value="cheque">Cheque</SelectItem>
                       <SelectItem value="card">Card</SelectItem>
+                      <SelectItem value="online_gateway">Online Gateway</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div>
+                  <Label>Payment Date</Label>
+                  <Input
+                    type="date"
+                    value={paymentDate}
+                    onChange={(e) => setPaymentDate(e.target.value)}
+                    data-testid="input-payment-date"
+                  />
                 </div>
                 <div>
                   <Label>Reference Number</Label>
@@ -319,6 +366,40 @@ export default function B2BOrderDetail() {
                     placeholder="Transaction/Cheque number"
                     data-testid="input-payment-reference"
                   />
+                </div>
+                <div>
+                  <Label>Payment Proof (optional)</Label>
+                  {paymentProofUrl ? (
+                    <div className="flex items-center gap-2 p-2 border rounded-md bg-muted/30">
+                      <span className="text-sm truncate flex-1">Proof uploaded</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setPaymentProofUrl("")}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ) : (
+                    <div
+                      className="border border-dashed rounded-md p-4 text-center cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => document.getElementById("record-payment-proof-input")?.click()}
+                    >
+                      <input
+                        id="record-payment-proof-input"
+                        type="file"
+                        className="hidden"
+                        accept="image/*,.pdf"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) uploadPaymentProof(file);
+                          e.target.value = "";
+                        }}
+                      />
+                      {isPaymentProofUploading ? "Uploading..." : "Click to upload proof (image or PDF)"}
+                    </div>
+                  )}
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" onClick={() => setPaymentDialogOpen(false)}>
@@ -591,6 +672,26 @@ export default function B2BOrderDetail() {
                     {formatCurrency((order as { earning?: string })?.earning ?? "0")}
                   </span>
                 </div>
+                <Separator />
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Commission payout:</span>
+                  {(order as { commissionPaidAt?: string | null }).commissionPaidAt ? (
+                    <span className="text-sm text-muted-foreground">
+                      Paid on {format(new Date((order as { commissionPaidAt: string }).commissionPaidAt), "MMM d, yyyy")}
+                    </span>
+                  ) : canEdit ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={markPayoutMutation.isPending}
+                      onClick={() => markPayoutMutation.mutate()}
+                    >
+                      {markPayoutMutation.isPending ? "Saving..." : "Mark as Paid"}
+                    </Button>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">Unpaid</span>
+                  )}
+                </div>
               </>
             ) : (
               <p className="text-muted-foreground text-sm">Commission: Pending calculation (order must be fully paid and delivered/closed)</p>
@@ -757,6 +858,76 @@ export default function B2BOrderDetail() {
           </CardHeader>
           <CardContent>
             <p className="text-sm">{order.specialInstructions}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {order.advanceAmount != null && parseFloat(String(order.advanceAmount)) > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <CreditCard className="h-5 w-5" />
+              Advance Payment
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Amount:</span>
+              <span className="font-medium">{formatCurrency(order.advanceAmount)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Mode:</span>
+              <span>{advanceModeLabels[order.advanceMode ?? ""] ?? order.advanceMode ?? "—"}</span>
+            </div>
+            {order.advanceDate && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Date:</span>
+                <span>{format(new Date(order.advanceDate), "MMM d, yyyy")}</span>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Reference:</span>
+              <span>{order.advanceReference || "—"}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground">Proof:</span>
+              {order.advanceProofUrl ? (
+                <span className="flex items-center gap-2">
+                  <a
+                    href={
+                      order.advanceProofUrl.startsWith("/uploads/")
+                        ? `/api/uploads/serve?path=${encodeURIComponent(order.advanceProofUrl)}`
+                        : order.advanceProofUrl.startsWith("http")
+                          ? order.advanceProofUrl
+                          : `/api/uploads/serve?path=${encodeURIComponent("/" + order.advanceProofUrl)}`
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary hover:underline inline-flex items-center gap-1"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    View proof
+                  </a>
+                  <a
+                    href={
+                      order.advanceProofUrl.startsWith("/uploads/")
+                        ? `/api/uploads/serve?path=${encodeURIComponent(order.advanceProofUrl)}&download=1`
+                        : order.advanceProofUrl.startsWith("http")
+                          ? order.advanceProofUrl
+                          : `/api/uploads/serve?path=${encodeURIComponent("/" + order.advanceProofUrl)}&download=1`
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary hover:underline inline-flex items-center gap-1"
+                  >
+                    <Download className="h-3 w-3" />
+                    Download
+                  </a>
+                </span>
+              ) : (
+                <span className="text-muted-foreground text-sm">No proof</span>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}

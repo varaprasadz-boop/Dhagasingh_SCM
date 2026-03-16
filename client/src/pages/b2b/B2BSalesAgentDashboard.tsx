@@ -114,6 +114,19 @@ export default function B2BSalesAgentDashboard() {
     queryKey: ["/api/b2b/commission/my-summary"],
   });
 
+  interface CommissionOrderRow {
+    orderId: string;
+    orderNumber: string;
+    clientName: string;
+    totalAmount: number;
+    commissionType: string;
+    commissionAmount: number;
+    commissionStatus: string;
+  }
+  const { data: commissionOrders = [] } = useQuery<CommissionOrderRow[]>({
+    queryKey: ["/api/b2b/commission/my-orders"],
+  });
+
   const periodMetrics =
     viewMode === "today" && stats?.byPeriod
       ? stats.byPeriod.today
@@ -314,7 +327,7 @@ export default function B2BSalesAgentDashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2 gap-2">
-            <CardTitle className="text-sm font-medium">Pending Commission</CardTitle>
+            <CardTitle className="text-sm font-medium">Estimated Pending</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-amber-600">
@@ -324,6 +337,54 @@ export default function B2BSalesAgentDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Commission by Order */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Commission by Order</CardTitle>
+          <p className="text-sm text-muted-foreground">Expected or earned commission per order</p>
+        </CardHeader>
+        <CardContent>
+          {commissionOrders.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2 font-medium">Order #</th>
+                    <th className="text-left py-2 font-medium">Client</th>
+                    <th className="text-right py-2 font-medium">Total</th>
+                    <th className="text-left py-2 font-medium">Commission type</th>
+                    <th className="text-right py-2 font-medium">Commission</th>
+                    <th className="text-left py-2 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {commissionOrders.map((row) => (
+                    <tr key={row.orderId} className="border-b last:border-0">
+                      <td className="py-2">
+                        <Link href={`/b2b/orders/${row.orderId}`} className="text-primary hover:underline">
+                          {row.orderNumber}
+                        </Link>
+                      </td>
+                      <td className="py-2 text-muted-foreground">{row.clientName}</td>
+                      <td className="py-2 text-right">{formatCurrency(row.totalAmount)}</td>
+                      <td className="py-2 text-muted-foreground">{row.commissionType || "—"}</td>
+                      <td className="py-2 text-right font-medium">{formatCurrency(row.commissionAmount)}</td>
+                      <td className="py-2">
+                        <Badge variant={row.commissionStatus === "earned" ? "default" : "secondary"}>
+                          {row.commissionStatus === "earned" ? "Earned" : "Pending"}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-4">No orders yet</p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Action Items */}
       {stats?.actionItems && (stats.actionItems.pendingApprovals > 0 || stats.actionItems.overduePayments > 0 || stats.actionItems.pendingInvoices > 0) && (

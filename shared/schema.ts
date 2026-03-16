@@ -418,6 +418,8 @@ export const b2bOrders = pgTable("b2b_orders", {
   productCost: decimal("product_cost", { precision: 10, scale: 2 }).default("0").notNull(),
   earning: decimal("earning", { precision: 10, scale: 2 }).default("0").notNull(),
   commissionStatus: b2bCommissionStatusEnum("commission_status").default("pending").notNull(),
+  commissionPaidAt: timestamp("commission_paid_at"),
+  commissionPaidBy: varchar("commission_paid_by").references(() => users.id),
   // Legacy fields kept for compatibility
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).default("0").notNull(),
   printingCost: decimal("printing_cost", { precision: 10, scale: 2 }).default("0").notNull(),

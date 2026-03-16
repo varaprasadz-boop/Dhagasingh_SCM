@@ -29,6 +29,7 @@ import {
   PERMISSION_CODES
 } from "@shared/schema";
 import { hash, compare } from "bcrypt";
+import { computeCommissionAmount } from "./utils/commissionCalc";
 
 const SALT_ROUNDS = 10;
 
@@ -198,6 +199,7 @@ export interface IStorage {
 
   // B2B Commission summary for a sales agent
   getB2BCommissionSummaryForUser(userId: string): Promise<{ earned: number; pending: number }>;
+  getB2BCommissionOrdersForUser(userId: string): Promise<B2BCommissionOrderRow[]>;
 
   // B2B Reports
   getB2BReportSummary(filters: B2BReportFilters): Promise<B2BReportSummaryResult>;
@@ -273,11 +275,20 @@ export interface B2BReportPaymentRow {
   orderId: string;
   orderNumber: string;
   clientName: string;
+  agentName: string;
+  orderDate: string;
   totalAmount: number;
   received: number;
   pending: number;
   paymentStatus: string;
+  advanceMode: string | null;
+  advanceDate: string | null;
+  advanceReference: string | null;
+  advanceProofStatus: "Uploaded" | "Not Uploaded";
+  subsequentPaymentsCount: number;
+  daysSinceOrderCreated: number;
   daysOverdue: number;
+  orderStatus: string;
 }
 
 export interface B2BReportCommissionRow {
@@ -290,6 +301,17 @@ export interface B2BReportCommissionRow {
   commissionType: string;
   commissionAmount: number;
   status: string;
+  commissionPaidAt?: string | null;
+}
+
+export interface B2BCommissionOrderRow {
+  orderId: string;
+  orderNumber: string;
+  clientName: string;
+  totalAmount: number;
+  commissionType: string;
+  commissionAmount: number;
+  commissionStatus: string;
 }
 
 interface OrderFilters {
@@ -2220,23 +2242,52 @@ class DatabaseStorage implements IStorage {
 
   async getB2BCommissionSummaryForUser(userId: string): Promise<{ earned: number; pending: number }> {
     try {
-      const orders = await db.select({
-        salesAgentCommission: b2bOrders.salesAgentCommission,
-        commissionStatus: b2bOrders.commissionStatus,
-      })
-        .from(b2bOrders)
-        .where(eq(b2bOrders.createdBy, userId));
+      const orders = await this.getB2BOrders({ createdBy: userId });
       let earned = 0;
       let pending = 0;
       for (const o of orders) {
-        const amt = parseFloat(String(o.salesAgentCommission ?? 0)) || 0;
-        if (o.commissionStatus === "earned") earned += amt;
-        else pending += amt;
+        const totalAmount = parseFloat(String(o.totalAmount ?? 0)) || 0;
+        const totalQuantity = (o.items ?? []).reduce((sum: number, i: { quantity?: number }) => sum + (i.quantity ?? 0), 0);
+        const agent = o.createdByUser as { commissionType?: string | null; commissionValue?: string | null; commissionMode?: string | null } | null;
+        if (o.commissionStatus === "earned") {
+          earned += parseFloat(String(o.salesAgentCommission ?? 0)) || 0;
+        } else {
+          pending += computeCommissionAmount(totalAmount, totalQuantity, agent);
+        }
       }
       return { earned, pending };
     } catch (error) {
       console.error("Error fetching B2B commission summary:", error);
       return { earned: 0, pending: 0 };
+    }
+  }
+
+  async getB2BCommissionOrdersForUser(userId: string): Promise<B2BCommissionOrderRow[]> {
+    try {
+      const orders = await this.getB2BOrders({ createdBy: userId });
+      return orders.map((o) => {
+        const totalAmount = parseFloat(String(o.totalAmount ?? 0)) || 0;
+        const totalQuantity = (o.items ?? []).reduce((sum: number, i: { quantity?: number }) => sum + (i.quantity ?? 0), 0);
+        const agent = o.createdByUser as { commissionType?: string | null; commissionValue?: string | null; commissionMode?: string | null } | null;
+        const commissionType = agent?.commissionType ?? "";
+        const commissionStatus = (o as { commissionStatus?: string }).commissionStatus ?? "pending";
+        const commissionAmount =
+          commissionStatus === "earned"
+            ? parseFloat(String((o as { salesAgentCommission?: string }).salesAgentCommission ?? 0)) || 0
+            : computeCommissionAmount(totalAmount, totalQuantity, agent);
+        return {
+          orderId: o.id,
+          orderNumber: o.orderNumber,
+          clientName: (o.client as { companyName?: string })?.companyName ?? "Unknown",
+          totalAmount,
+          commissionType: commissionType.replace(/_/g, " "),
+          commissionAmount,
+          commissionStatus,
+        };
+      });
+    } catch (error) {
+      console.error("Error fetching B2B commission orders for user:", error);
+      return [];
     }
   }
 
@@ -2255,7 +2306,7 @@ class DatabaseStorage implements IStorage {
     if (filters.paymentStatus?.length) conditions.push(inArray(b2bOrders.paymentStatus, filters.paymentStatus as any));
     const result = await db.query.b2bOrders.findMany({
       where: conditions.length > 0 ? and(...conditions) : undefined,
-      with: { client: true, createdByUser: true, items: { with: { product: true } } },
+      with: { client: true, createdByUser: true, items: { with: { product: true } }, payments: true },
       orderBy: [desc(b2bOrders.createdAt)],
     });
     return (result || []) as unknown as B2BOrderWithDetails[];
@@ -2424,15 +2475,28 @@ class DatabaseStorage implements IStorage {
         due.setDate(due.getDate() + 30);
         if (now > due) daysOverdue = Math.floor((now.getTime() - due.getTime()) / (24 * 60 * 60 * 1000));
       }
+      const createdAt = o.createdAt ? new Date(o.createdAt) : now;
+      const daysSinceOrderCreated = Math.floor((now.getTime() - createdAt.getTime()) / (24 * 60 * 60 * 1000));
+      const advanceDate = (o as any).advanceDate;
+      const orderDate = createdAt.toISOString().split("T")[0];
       return {
         orderId: o.id,
         orderNumber: o.orderNumber,
         clientName: (o.client as any)?.companyName ?? "Unknown",
+        agentName: (o.createdByUser as any)?.name ?? "Unknown",
+        orderDate,
         totalAmount: total,
         received,
         pending,
         paymentStatus: o.paymentStatus,
+        advanceMode: (o as any).advanceMode ?? null,
+        advanceDate: advanceDate ? new Date(advanceDate).toISOString().split("T")[0] : null,
+        advanceReference: (o as any).advanceReference ?? null,
+        advanceProofStatus: (o as any).advanceProofUrl ? "Uploaded" : "Not Uploaded",
+        subsequentPaymentsCount: (o as any).payments?.length ?? 0,
+        daysSinceOrderCreated,
         daysOverdue,
+        orderStatus: o.status,
       };
     });
   }
@@ -2449,6 +2513,7 @@ class DatabaseStorage implements IStorage {
       commissionType: (o.createdByUser as any)?.commissionType ?? "",
       commissionAmount: parseFloat(String((o as any).salesAgentCommission ?? 0)) || 0,
       status: (o as any).commissionStatus ?? "pending",
+      commissionPaidAt: (o as any).commissionPaidAt ?? null,
     }));
   }
 

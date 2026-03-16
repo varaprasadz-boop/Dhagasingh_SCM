@@ -2687,9 +2687,10 @@ export async function registerRoutes(
         });
       }
       
-      // Calculate balance
+      // Calculate balance and payment status (fully_paid when advance >= total)
       const balancePending = totalAmount - advanceAmount;
-      
+      const paymentStatus = advanceAmount >= totalAmount ? "fully_paid" : "advance_received";
+
       // Create order with financial data
       const order = await storage.createB2BOrder(
         {
@@ -2703,7 +2704,7 @@ export async function registerRoutes(
           advanceProofUrl: advanceProofUrl || null,
           amountReceived: String(advanceAmount),
           balancePending: String(balancePending),
-          paymentStatus: "advance_received",
+          paymentStatus,
           createdBy: req.user!.id,
         },
         items.map(item => {
@@ -2720,22 +2721,58 @@ export async function registerRoutes(
         })
       );
       // Create an initial payment record for the advance so it appears in Payment History (with proof/invoice)
+      let advanceRecordWarning: string | undefined;
       if (advanceAmount > 0) {
-        try {
-          await storage.createB2BPaymentRecordOnly({
-            orderId: order.id,
-            amount: String(advanceAmount),
-            paymentMode: advanceMode,
-            paymentDate: new Date(advanceDate),
-            transactionRef: advanceReference || undefined,
-            proofUrl: advanceProofUrl || undefined,
-            recordedBy: req.user!.id,
-          });
-        } catch (err) {
-          console.error("Error creating advance payment record for order", order.id, err);
+        const advancePayload = {
+          orderId: order.id,
+          amount: String(advanceAmount),
+          paymentMode: advanceMode,
+          paymentDate: new Date(advanceDate),
+          transactionRef: advanceReference || undefined,
+          proofUrl: advanceProofUrl || undefined,
+          recordedBy: req.user!.id,
+        };
+        const maxAttempts = 3;
+        const delayMs = 500;
+        let lastErr: unknown;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          try {
+            await storage.createB2BPaymentRecordOnly(advancePayload);
+            lastErr = undefined;
+            break;
+          } catch (err) {
+            lastErr = err;
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("Advance payment record failed", {
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              advanceAmount,
+              advanceMode,
+              attempt,
+              error: msg,
+              ...(process.env.NODE_ENV === "development" && err instanceof Error && { stack: err.stack }),
+            });
+            if (attempt < maxAttempts) {
+              await new Promise((r) => setTimeout(r, delayMs));
+            }
+          }
+        }
+        if (lastErr) {
+          advanceRecordWarning = "Advance payment record could not be saved. Please add it manually from Payment History.";
+          setTimeout(() => {
+            storage.createB2BPaymentRecordOnly(advancePayload).catch((e) =>
+              console.error("Delayed retry for advance payment record failed", order.id, e)
+            );
+          }, 2000);
         }
       }
-      res.status(201).json(order);
+
+      // If order is fully paid and already delivered/closed at creation, trigger commission
+      if (order.paymentStatus === "fully_paid" && (order.status === "delivered" || order.status === "closed")) {
+        calculateAndStoreCommission(order.id).catch((err) => console.error("Commission calculation failed:", err));
+      }
+
+      res.status(201).json(advanceRecordWarning ? { ...order, warning: advanceRecordWarning } : order);
     } catch (error) {
       console.error("Error creating B2B order:", error);
       res.status(500).json({ error: "Failed to create order" });
@@ -2744,7 +2781,6 @@ export async function registerRoutes(
 
   app.patch("/api/b2b/orders/:id", authMiddleware, requirePermission(PERMISSION_CODES.EDIT_B2B_ORDERS), async (req, res) => {
     try {
-      // Check ownership before update
       const existingOrder = await storage.getB2BOrderById(req.params.id);
       if (!existingOrder) {
         return res.status(404).json({ error: "Order not found" });
@@ -2753,7 +2789,21 @@ export async function registerRoutes(
       if (!canViewAll && existingOrder.createdBy !== req.user!.id) {
         return res.status(403).json({ error: "You can only update your own orders" });
       }
-      const order = await storage.updateB2BOrder(req.params.id, req.body);
+      const body = req.body as Record<string, unknown>;
+      const updateData = { ...body };
+      const commissionAffecting =
+        Array.isArray(body.items) ||
+        body.totalAmount !== undefined;
+      if (
+        (existingOrder as { commissionStatus?: string }).commissionStatus === "earned" &&
+        commissionAffecting
+      ) {
+        updateData.commissionStatus = "pending";
+        updateData.salesAgentCommission = "0";
+        updateData.productCost = "0";
+        updateData.earning = "0";
+      }
+      const order = await storage.updateB2BOrder(req.params.id, updateData);
       res.json(order);
     } catch (error) {
       res.status(500).json({ error: "Failed to update order" });
@@ -3004,6 +3054,27 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/b2b/orders/:id/commission-payout", authMiddleware, requirePermission(PERMISSION_CODES.EDIT_B2B_ORDERS), async (req, res) => {
+    try {
+      const order = await storage.getB2BOrderById(req.params.id);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+      const canViewAll = await canViewAllB2BData(req.user!);
+      if (!canViewAll && order.createdBy !== req.user!.id) {
+        return res.status(403).json({ error: "You can only update your own orders" });
+      }
+      if ((order as { commissionStatus?: string }).commissionStatus !== "earned") {
+        return res.status(400).json({ error: "Commission must be earned before marking as paid" });
+      }
+      const updated = await storage.updateB2BOrder(req.params.id, {
+        commissionPaidAt: new Date(),
+        commissionPaidBy: req.user!.id,
+      });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to record commission payout" });
+    }
+  });
+
   // B2B Invoices
   app.get("/api/b2b/invoices", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_INVOICES), async (req, res) => {
     try {
@@ -3248,6 +3319,15 @@ export async function registerRoutes(
       res.json(summary);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch commission summary" });
+    }
+  });
+
+  app.get("/api/b2b/commission/my-orders", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_B2B_DASHBOARD), async (req, res) => {
+    try {
+      const rows = await storage.getB2BCommissionOrdersForUser(req.user!.id);
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch commission orders" });
     }
   });
 

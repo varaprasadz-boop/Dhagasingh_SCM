@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -386,6 +386,46 @@ export default function B2BOrders() {
         })
     ).entries()
   ).map(([id, name]) => ({ id, name }));
+
+  const orderSummary = useMemo(() => {
+    const list = filteredOrders ?? [];
+    let totalBusiness = 0;
+    let totalCollected = 0;
+    let totalPending = 0;
+    for (const o of list) {
+      totalBusiness += parseFloat(String(o.totalAmount ?? 0)) || 0;
+      totalCollected += parseFloat(String(o.amountReceived ?? 0)) || 0;
+      totalPending += parseFloat(String(o.balancePending ?? 0)) || 0;
+    }
+    return { orderCount: list.length, totalBusiness, totalCollected, totalPending };
+  }, [filteredOrders]);
+
+  const agentFilterActive =
+    (appliedFilters && appliedFilters.agentId !== "all") || (!appliedFilters && agentFilter !== "all");
+  const agentNameForCallout = appliedFilters?.agentId && appliedFilters.agentId !== "all"
+    ? (users.find((u) => u.id === appliedFilters!.agentId)?.name ?? "Unknown")
+    : !appliedFilters && agentFilter !== "all"
+      ? (agentOptions.find((a) => a.id === agentFilter)?.name ?? "Unknown")
+      : null;
+
+  const agentSummary = useMemo(() => {
+    if (!agentFilterActive || !agentNameForCallout) return null;
+    const list = filteredOrders ?? [];
+    let totalValue = 0;
+    let collected = 0;
+    let pending = 0;
+    let commissionEarned = 0;
+    for (const o of list) {
+      totalValue += parseFloat(String(o.totalAmount ?? 0)) || 0;
+      collected += parseFloat(String(o.amountReceived ?? 0)) || 0;
+      pending += parseFloat(String(o.balancePending ?? 0)) || 0;
+      const ord = o as { commissionStatus?: string; salesAgentCommission?: string };
+      if (ord.commissionStatus === "earned") {
+        commissionEarned += parseFloat(String(ord.salesAgentCommission ?? 0)) || 0;
+      }
+    }
+    return { agentName: agentNameForCallout, orderCount: list.length, totalValue, collected, pending, commissionEarned };
+  }, [filteredOrders, agentFilterActive, agentNameForCallout]);
 
   useEffect(() => {
     setDisplayCount(ITEMS_PER_PAGE);
@@ -824,6 +864,58 @@ export default function B2BOrders() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Summary bar: totals from current filtered list */}
+      {agentFilterActive && agentNameForCallout && (
+        <p className="text-sm text-muted-foreground" data-testid="orders-agent-callout">
+          Showing orders for: <span className="font-medium text-foreground">{agentNameForCallout}</span>
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border bg-muted/40 px-4 py-2 text-sm" data-testid="orders-summary-bar">
+        <span><strong>{orderSummary.orderCount}</strong> orders</span>
+        <span>·</span>
+        <span><strong>{formatCurrency(orderSummary.totalBusiness)}</strong> total business</span>
+        <span>·</span>
+        <span><strong className="text-green-600">{formatCurrency(orderSummary.totalCollected)}</strong> collected</span>
+        <span>·</span>
+        <span><strong className="text-amber-600">{formatCurrency(orderSummary.totalPending)}</strong> pending</span>
+      </div>
+
+      {agentSummary && (
+        <Card className="border-primary/30" data-testid="orders-agent-summary-card">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Agent Summary</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 sm:grid-cols-6 gap-4 text-sm">
+              <div>
+                <p className="text-muted-foreground">Agent</p>
+                <p className="font-medium">{agentSummary.agentName}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Orders</p>
+                <p className="font-medium">{agentSummary.orderCount}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Total Value</p>
+                <p className="font-medium">{formatCurrency(agentSummary.totalValue)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Collected</p>
+                <p className="font-medium text-green-600">{formatCurrency(agentSummary.collected)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Pending</p>
+                <p className="font-medium text-amber-600">{formatCurrency(agentSummary.pending)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Commission Earned</p>
+                <p className="font-medium">{formatCurrency(agentSummary.commissionEarned)}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Legacy client-side quick filters when no API filters applied */}
       {!appliedFilters && (

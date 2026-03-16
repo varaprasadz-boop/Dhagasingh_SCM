@@ -32,16 +32,18 @@ import {
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Search, CreditCard, Calendar, IndianRupee, TrendingUp, Clock, ChevronDown } from "lucide-react";
+import { Plus, Search, CreditCard, Calendar, IndianRupee, TrendingUp, Clock, ChevronDown, ExternalLink, Download } from "lucide-react";
 import { format } from "date-fns";
 import type { B2BPayment, B2BOrderWithDetails } from "@shared/schema";
+import { useUpload } from "@/hooks/use-upload";
 
 const paymentFormSchema = z.object({
   orderId: z.string().min(1, "Order is required"),
   amount: z.coerce.number().positive("Amount must be greater than 0"),
-  paymentMode: z.enum(["cash", "bank_transfer", "upi", "cheque", "card"]),
+  paymentMode: z.enum(["cash", "bank_transfer", "upi", "cheque", "card", "online_gateway"]),
   transactionRef: z.string().optional().or(z.literal("")),
   paymentDate: z.string().min(1, "Payment date is required"),
+  proofUrl: z.string().optional().or(z.literal("")),
   remarks: z.string().optional().or(z.literal("")),
 });
 
@@ -53,6 +55,7 @@ const paymentModeLabels: Record<string, string> = {
   upi: "UPI",
   cheque: "Cheque",
   card: "Card",
+  online_gateway: "Online Gateway",
 };
 
 const ITEMS_PER_PAGE = 10;
@@ -87,7 +90,19 @@ export default function B2BPayments() {
       paymentMode: "bank_transfer",
       transactionRef: "",
       paymentDate: new Date().toISOString().split("T")[0],
+      proofUrl: "",
       remarks: "",
+    },
+  });
+
+  const { uploadFile: uploadPaymentProof, isUploading: isPaymentProofUploading } = useUpload({
+    category: "payment-proofs",
+    onSuccess: (response) => {
+      form.setValue("proofUrl", response.objectPath);
+      toast({ title: "Payment proof uploaded successfully" });
+    },
+    onError: (error) => {
+      toast({ title: "Failed to upload payment proof", description: error.message, variant: "destructive" });
     },
   });
 
@@ -113,7 +128,10 @@ export default function B2BPayments() {
   });
 
   const handleSubmit = (data: PaymentFormData) => {
-    createMutation.mutate(data);
+    createMutation.mutate({
+      ...data,
+      proofUrl: data.proofUrl || undefined,
+    });
   };
 
   const filteredPayments = payments?.filter((payment) => {
@@ -229,6 +247,7 @@ export default function B2BPayments() {
                           <SelectItem value="upi">UPI</SelectItem>
                           <SelectItem value="cheque">Cheque</SelectItem>
                           <SelectItem value="card">Card</SelectItem>
+                          <SelectItem value="online_gateway">Online Gateway</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -260,6 +279,47 @@ export default function B2BPayments() {
                         <Input {...field} type="date" data-testid="input-date" />
                       </FormControl>
                       <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="proofUrl"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Payment Proof (optional)</FormLabel>
+                      {field.value ? (
+                        <div className="flex items-center gap-2 p-2 border rounded-md bg-muted/30">
+                          <span className="text-sm truncate flex-1">Proof uploaded</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => field.onChange("")}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      ) : (
+                        <div
+                          className="border border-dashed rounded-md p-4 text-center cursor-pointer hover:bg-muted/50 transition-colors"
+                          onClick={() => document.getElementById("b2b-payments-proof-input")?.click()}
+                        >
+                          <input
+                            id="b2b-payments-proof-input"
+                            type="file"
+                            className="hidden"
+                            accept="image/*,.pdf"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) uploadPaymentProof(file);
+                              e.target.value = "";
+                            }}
+                          />
+                          {isPaymentProofUploading ? "Uploading..." : "Click to upload proof (image or PDF)"}
+                        </div>
+                      )}
                     </FormItem>
                   )}
                 />
@@ -358,6 +418,44 @@ export default function B2BPayments() {
                         </div>
                         {payment.transactionRef && (
                           <span>Ref: {payment.transactionRef}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-sm">
+                        {payment.proofUrl ? (
+                          <>
+                            <a
+                              href={
+                                payment.proofUrl.startsWith("/uploads/")
+                                  ? `/api/uploads/serve?path=${encodeURIComponent(payment.proofUrl)}`
+                                  : payment.proofUrl.startsWith("http")
+                                    ? payment.proofUrl
+                                    : `/api/uploads/serve?path=${encodeURIComponent("/" + payment.proofUrl)}`
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline inline-flex items-center gap-1"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              View proof
+                            </a>
+                            <a
+                              href={
+                                payment.proofUrl.startsWith("/uploads/")
+                                  ? `/api/uploads/serve?path=${encodeURIComponent(payment.proofUrl)}&download=1`
+                                  : payment.proofUrl.startsWith("http")
+                                    ? payment.proofUrl
+                                    : `/api/uploads/serve?path=${encodeURIComponent("/" + payment.proofUrl)}&download=1`
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline inline-flex items-center gap-1"
+                            >
+                              <Download className="h-3 w-3" />
+                              Download
+                            </a>
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground">No proof</span>
                         )}
                       </div>
                     </div>
