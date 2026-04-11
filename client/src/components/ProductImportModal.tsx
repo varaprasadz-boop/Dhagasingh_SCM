@@ -80,7 +80,8 @@ export function ProductImportModal({ open, onOpenChange }: ProductImportModalPro
       });
       setStep("complete");
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      
+      queryClient.invalidateQueries({ queryKey: ["/api/products?activeOnly=true"] });
+
       if (data.errors === 0) {
         toast({
           title: "Import Successful",

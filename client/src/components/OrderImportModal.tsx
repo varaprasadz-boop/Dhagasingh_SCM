@@ -64,7 +64,9 @@ export function OrderImportModal({ open, onOpenChange }: OrderImportModalProps) 
   const [importResult, setImportResult] = useState<{
     imported: number;
     errors: number;
-    errorDetails: Array<{ orderNumber: string; error: string }>;
+    errorDetails: Array<{ orderNumber: string; error: string; sku?: string }>;
+    warnings: number;
+    warningDetails: Array<{ orderNumber: string; sku: string; message: string }>;
   } | null>(null);
 
   const importMutation = useMutation({
@@ -73,19 +75,28 @@ export function OrderImportModal({ open, onOpenChange }: OrderImportModalProps) 
       return response.json();
     },
     onSuccess: (data: any) => {
+      const warningDetails = data.warningDetails || [];
+      const warnings = typeof data.warnings === "number" ? data.warnings : warningDetails.length;
       setImportResult({
         imported: data.imported,
         errors: data.errors,
         errorDetails: data.errorDetails || [],
+        warnings,
+        warningDetails,
       });
       setStep("complete");
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      
-      if (data.errors === 0) {
+
+      if (data.errors === 0 && warnings === 0) {
         toast({
           title: "Import Successful",
           description: `${data.imported} orders imported successfully`,
+        });
+      } else if (data.errors === 0 && warnings > 0) {
+        toast({
+          title: "Import Successful",
+          description: `${data.imported} orders imported; ${warnings} SKU warning(s) — review details below`,
         });
       } else {
         toast({
@@ -348,6 +359,9 @@ export function OrderImportModal({ open, onOpenChange }: OrderImportModalProps) 
                   {importResult.errors > 0 && (
                     <p className="text-destructive">{importResult.errors} failed</p>
                   )}
+                  {importResult.errors === 0 && importResult.warnings > 0 && (
+                    <p className="text-muted-foreground">{importResult.warnings} SKU warning(s)</p>
+                  )}
                 </div>
               </div>
 
@@ -360,7 +374,33 @@ export function OrderImportModal({ open, onOpenChange }: OrderImportModalProps) 
                       <ul className="text-sm list-disc list-inside space-y-1">
                         {importResult.errorDetails.map((err, i) => (
                           <li key={i}>
-                            <span className="font-mono">{err.orderNumber}</span>: {err.error}
+                            <span className="font-mono">{err.orderNumber}</span>
+                            {err.sku ? (
+                              <>
+                                {" "}
+                                (<span className="font-mono">{err.sku}</span>)
+                              </>
+                            ) : null}
+                            : {err.error}
+                          </li>
+                        ))}
+                      </ul>
+                    </ScrollArea>
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {importResult.warningDetails.length > 0 && (
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    <p className="font-medium mb-2">SKU warnings (orders were still imported):</p>
+                    <ScrollArea className="max-h-32">
+                      <ul className="text-sm list-disc list-inside space-y-1">
+                        {importResult.warningDetails.map((w, i) => (
+                          <li key={i}>
+                            <span className="font-mono">{w.orderNumber}</span> —{" "}
+                            <span className="font-mono">{w.sku}</span>: {w.message}
                           </li>
                         ))}
                       </ul>

@@ -77,7 +77,7 @@ export interface IStorage {
   deleteSupplier(id: string): Promise<boolean>;
   
   // Products
-  getProducts(): Promise<ProductWithVariants[]>;
+  getProducts(activeOnly?: boolean): Promise<ProductWithVariants[]>;
   getProductById(id: string): Promise<ProductWithVariants | undefined>;
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: string, product: Partial<InsertProduct>): Promise<Product | undefined>;
@@ -818,9 +818,16 @@ class DatabaseStorage implements IStorage {
   }
 
   // Products
-  async getProducts(): Promise<ProductWithVariants[]> {
+  async getProducts(activeOnly?: boolean): Promise<ProductWithVariants[]> {
     try {
-      const prods = await db.select().from(products).orderBy(asc(products.name));
+      const prods =
+        activeOnly === true
+          ? await db
+              .select()
+              .from(products)
+              .where(eq(products.isActive, true))
+              .orderBy(asc(products.name))
+          : await db.select().from(products).orderBy(asc(products.name));
       if (!prods || prods.length === 0) return [];
       
       const result: ProductWithVariants[] = [];

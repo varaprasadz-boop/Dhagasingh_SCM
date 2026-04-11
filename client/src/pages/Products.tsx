@@ -7,6 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -31,6 +41,11 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ProductImportModal } from "@/components/ProductImportModal";
 import type { ProductWithVariants, ProductVariant } from "@shared/schema";
 import type { UseMutationResult } from "@tanstack/react-query";
+
+function invalidateProductLists() {
+  queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/products?activeOnly=true"] });
+}
 
 type VariantRow = {
   id: string;
@@ -62,6 +77,7 @@ function EditProductDialog({
   addVariantMutation: UseMutationResult<ProductVariant, Error, { productId: string; data: { sku: string; color: string; size: string; stockQuantity: number; costPrice: string; sellingPrice: string } }>;
   deleteVariantMutation: UseMutationResult<unknown, Error, string>;
 }) {
+  const { toast } = useToast();
   const [name, setName] = useState(product.name);
   const [description, setDescription] = useState(product.description ?? "");
   const [category, setCategory] = useState(product.category ?? "");
@@ -146,6 +162,7 @@ function EditProductDialog({
           });
         }
       }
+      toast({ title: "Product updated successfully" });
       onSuccess();
     } catch {
       // Toasts are handled by mutation onError
@@ -322,6 +339,8 @@ export default function Products() {
   const [editingProduct, setEditingProduct] = useState<ProductWithVariants | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<ProductWithVariants | null>(null);
+  const [disableConfirmProduct, setDisableConfirmProduct] = useState<ProductWithVariants | null>(null);
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
 
   const [newProduct, setNewProduct] = useState({
     name: "",
@@ -352,7 +371,7 @@ export default function Products() {
       }[];
     }) => apiRequest("POST", "/api/products", data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductLists();
       toast({ title: "Product created successfully" });
       setCreateDialogOpen(false);
       setNewProduct({
@@ -373,7 +392,7 @@ export default function Products() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/products/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductLists();
       toast({ title: "Product deleted successfully" });
       setDeleteConfirmOpen(false);
       setProductToDelete(null);
@@ -389,8 +408,21 @@ export default function Products() {
     mutationFn: ({ id, data }: { id: string; data: { name?: string; description?: string; category?: string; isActive?: boolean } }) =>
       apiRequest("PATCH", `/api/products/${id}`, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      toast({ title: "Product updated successfully" });
+      invalidateProductLists();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to update product", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
+      apiRequest("PATCH", `/api/products/${id}`, { isActive }),
+    onSuccess: (_, { isActive }) => {
+      invalidateProductLists();
+      toast({
+        title: isActive ? "Product enabled" : "Product disabled — it will no longer appear in order dropdowns",
+      });
     },
     onError: (error: Error) => {
       toast({ title: "Failed to update product", description: error.message, variant: "destructive" });
@@ -401,7 +433,7 @@ export default function Products() {
     mutationFn: ({ id, data }: { id: string; data: Partial<{ stockQuantity: number; costPrice: string; sellingPrice: string }> }) =>
       apiRequest("PATCH", `/api/variants/${id}`, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductLists();
     },
     onError: (error: Error) => {
       toast({ title: "Failed to update variant", description: error.message, variant: "destructive" });
@@ -417,7 +449,7 @@ export default function Products() {
       data: { sku: string; color: string; size: string; stockQuantity: number; costPrice: string; sellingPrice: string };
     }) => apiRequest("POST", `/api/products/${productId}/variants`, data).then((r) => r.json()),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductLists();
     },
     onError: (error: Error) => {
       const msg = error.message;
@@ -439,18 +471,26 @@ export default function Products() {
   const deleteVariantMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/variants/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductLists();
     },
     onError: (error: Error) => {
       toast({ title: "Failed to delete variant", description: error.message, variant: "destructive" });
     },
   });
 
-  const filteredProducts = products.filter(
-    (p) =>
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const matchesSearch = (p: ProductWithVariants) =>
+    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase()));
+
+  const filteredProducts = products.filter(matchesSearch).filter((p) => {
+    const inactive = (p as ProductWithVariants & { isActive?: boolean }).isActive === false;
+    if (statusFilter === "inactive") return inactive;
+    if (statusFilter === "active") return !inactive;
+    return true;
+  });
+
+  const inactiveCount = products.filter((p) => (p as { isActive?: boolean }).isActive === false).length;
+  const activeCount = products.length - inactiveCount;
 
   const columns = [
     {
@@ -503,36 +543,57 @@ export default function Products() {
     {
       key: "actions",
       header: "",
-      render: (p: ProductWithVariants) => (
-        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-          <Button
-            variant="ghost"
-            size="icon"
-            title="View"
-            onClick={() => {
-              setSelectedProduct(p);
-              setDetailsOpen(true);
-            }}
-            data-testid={`button-view-product-${p.id}`}
-          >
-            <Eye className="h-4 w-4" />
-          </Button>
-          {canEdit && (
+      render: (p: ProductWithVariants & { isActive?: boolean }) => {
+        const isRowActive = p.isActive !== false;
+        const toggling =
+          toggleActiveMutation.isPending && toggleActiveMutation.variables?.id === p.id;
+        return (
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             <Button
               variant="ghost"
               size="icon"
-              title="Edit"
+              title="View"
               onClick={() => {
-                setEditingProduct(p);
-                setEditDialogOpen(true);
+                setSelectedProduct(p);
+                setDetailsOpen(true);
               }}
-              data-testid={`button-edit-product-${p.id}`}
+              data-testid={`button-view-product-${p.id}`}
             >
-              <Pencil className="h-4 w-4" />
+              <Eye className="h-4 w-4" />
             </Button>
-          )}
-        </div>
-      ),
+            {canEdit && (
+              <>
+                <Switch
+                  className="mx-1"
+                  checked={isRowActive}
+                  disabled={toggling}
+                  title={isRowActive ? "Active" : "Inactive"}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      toggleActiveMutation.mutate({ id: p.id, isActive: true });
+                    } else {
+                      setDisableConfirmProduct(p);
+                    }
+                  }}
+                  data-testid={`switch-product-active-${p.id}`}
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  title="Edit"
+                  onClick={() => {
+                    setEditingProduct(p);
+                    setEditDialogOpen(true);
+                  }}
+                  data-testid={`button-edit-product-${p.id}`}
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+              </>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -580,6 +641,9 @@ export default function Products() {
         <div>
           <h1 className="text-2xl font-bold" data-testid="text-page-title">Products</h1>
           <p className="text-muted-foreground">Manage your product catalog</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            {totalProducts} products ({activeCount} active, {inactiveCount} inactive)
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => setImportModalOpen(true)} data-testid="button-import-products">
@@ -614,12 +678,43 @@ export default function Products() {
         </Card>
       </div>
 
-      <SearchInput
-        placeholder="Search products..."
-        value={searchQuery}
-        onChange={setSearchQuery}
-        className="max-w-md"
-      />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <SearchInput
+          placeholder="Search products..."
+          value={searchQuery}
+          onChange={setSearchQuery}
+          className="max-w-md"
+        />
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter by status">
+          <Button
+            type="button"
+            size="sm"
+            variant={statusFilter === "all" ? "default" : "outline"}
+            onClick={() => setStatusFilter("all")}
+            data-testid="filter-products-all"
+          >
+            All
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={statusFilter === "active" ? "default" : "outline"}
+            onClick={() => setStatusFilter("active")}
+            data-testid="filter-products-active"
+          >
+            Active
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={statusFilter === "inactive" ? "default" : "outline"}
+            onClick={() => setStatusFilter("inactive")}
+            data-testid="filter-products-inactive"
+          >
+            Inactive
+          </Button>
+        </div>
+      </div>
 
       <Card>
         <CardContent className="p-0">
@@ -850,7 +945,7 @@ export default function Products() {
           onSuccess={() => {
             setEditDialogOpen(false);
             setEditingProduct(null);
-            queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+            invalidateProductLists();
           }}
           updateProductMutation={updateProductMutation}
           updateVariantMutation={updateVariantMutation}
@@ -860,6 +955,43 @@ export default function Products() {
       )}
 
       <ProductImportModal open={importModalOpen} onOpenChange={setImportModalOpen} />
+
+      <AlertDialog
+        open={!!disableConfirmProduct}
+        onOpenChange={(open) => {
+          if (!open) setDisableConfirmProduct(null);
+        }}
+      >
+        <AlertDialogContent data-testid="dialog-disable-product-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Disable product?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Disabling this product will hide it from all order creation forms and reject it during CSV import. Are you
+              sure?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={toggleActiveMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={toggleActiveMutation.isPending || !disableConfirmProduct}
+              className="inline-flex items-center gap-2"
+              onClick={async (e) => {
+                e.preventDefault();
+                const prod = disableConfirmProduct;
+                if (!prod) return;
+                try {
+                  await toggleActiveMutation.mutateAsync({ id: prod.id, isActive: false });
+                } finally {
+                  setDisableConfirmProduct(null);
+                }
+              }}
+            >
+              {toggleActiveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Disable
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

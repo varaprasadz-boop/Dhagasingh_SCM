@@ -154,7 +154,7 @@ export default function B2BOrderCreate() {
   });
 
   const { data: products = [] } = useQuery<ProductWithVariants[]>({
-    queryKey: ["/api/products"],
+    queryKey: ["/api/products?activeOnly=true"],
   });
 
   const { data: printingTypes = [] } = useQuery<B2BPrintingType[]>({

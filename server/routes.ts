@@ -471,7 +471,8 @@ export async function registerRoutes(
   });
 
   app.get("/api/products", authMiddleware, requirePermission(PERMISSION_CODES.VIEW_PRODUCTS), async (req, res) => {
-    const products = await storage.getProducts();
+    const activeOnly = req.query.activeOnly === "true";
+    const products = await storage.getProducts(activeOnly ? true : undefined);
     res.json(products);
   });
 
@@ -1309,6 +1310,7 @@ export async function registerRoutes(
       await storage.updateBulkUploadJob(job.id, { totalRows: rows.length });
 
       const errors: any[] = [];
+      const warnings: any[] = [];
       let successCount = 0;
       const orderGroups: { [key: string]: any } = {};
 
@@ -1355,8 +1357,10 @@ export async function registerRoutes(
         }
 
         if (row["Lineitem name"]) {
+          const csvSku = typeof row["Lineitem sku"] === "string" ? row["Lineitem sku"].trim() : "";
           orderGroups[orderName].items.push({
-            sku: row["Lineitem sku"] || `SKU-${Date.now()}`,
+            sku: csvSku || `SKU-${Date.now()}`,
+            csvSku,
             productName: row["Lineitem name"],
             quantity: parseInt(row["Lineitem quantity"]) || 1,
             price: parseFloat(row["Lineitem price"]) || 0,
@@ -1376,8 +1380,33 @@ export async function registerRoutes(
 
           const orderData = orderGroups[orderNumber];
           const { items, ...order } = orderData;
-          
-          await storage.createOrder(order, items);
+
+          let skipOrder = false;
+          for (const item of items as Array<{ sku: string; csvSku?: string }>) {
+            const variant = await storage.getProductVariantBySku(item.sku);
+            if (variant) {
+              const parent = await storage.getProductById(variant.productId);
+              if (parent && parent.isActive === false) {
+                errors.push({
+                  orderNumber,
+                  sku: item.sku,
+                  error: `SKU [${item.sku}] belongs to a disabled product and cannot be imported`,
+                });
+                skipOrder = true;
+                break;
+              }
+            } else if (item.csvSku) {
+              warnings.push({
+                orderNumber,
+                sku: item.csvSku,
+                message: `SKU [${item.csvSku}] is not in the catalog; order was still imported`,
+              });
+            }
+          }
+          if (skipOrder) continue;
+
+          const itemsForDb = (items as any[]).map(({ csvSku: _omit, ...rest }) => rest);
+          await storage.createOrder(order, itemsForDb);
           successCount++;
         } catch (error: any) {
           errors.push({ orderNumber, error: error.message });
@@ -1400,6 +1429,8 @@ export async function registerRoutes(
         imported: successCount,
         errors: errors.length,
         errorDetails: errors,
+        warnings: warnings.length,
+        warningDetails: warnings,
       });
     } catch (error) {
       console.error("Import error:", error);
